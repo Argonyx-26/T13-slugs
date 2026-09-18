@@ -25,10 +25,10 @@ This document outlines the data pipeline for the Intelligent Clinical Dictation 
 
 ## 4. Local Speech-to-Text (The Audio Engine)
 *   **Role:** Transcribing clear, single-speaker medical dictation with extreme speed and accuracy.
-*   **Tech Stack:** **`faster-whisper`** (Optimized with CTranslate2).
+*   **Tech Stack:** **NVIDIA NeMo Parakeet** (via local endpoint).
 *   **Specs:** 
-    *   **Model:** `small.en` or `medium.en` (English-only models).
-    *   **Why it's flawless:** Because the input is a single, clear voice speaking English close to a microphone, the STT will achieve near 100% accuracy. We completely bypass the need for heavy speaker diarization (WhisperX) or complex translation alignments. 
+    *   **Model:** `Parakeet Unified EN 0.6B` (State-of-the-art English model).
+    *   **Why it's flawless:** Because the input is a single, clear voice speaking English close to a microphone, the STT will achieve near 100% accuracy with sub-second latency. We bypass the need for heavy speaker diarization or complex translation alignments, and Parakeet outperforms traditional Whisper models in both speed and accuracy for this specific task.
     *   **Resource Utilization:** Highly efficient (~850MB to 1.5GB VRAM), capable of running on standard edge hardware instantly.
 
 ## 5. Local Privacy Safety Net

@@ -17,10 +17,10 @@ This document outlines the complete, end-to-end tech stack for the AI Clinical S
 *   **Workflow:** Receives the MP3 and UUID, holds them in memory (ephemeral processing), and orchestrates the STT, Privacy, and AI pipelines. Raw audio is never written to a hard drive.
 
 ## 🎙️ 3. Speech-to-Text (The Dictation Engine)
-*   **Tech Stack:** `faster-whisper` (OpenAI Whisper optimized via CTranslate2)
-*   **Model Size:** `small.en` (English-only, highly optimized for speed)
+*   **Tech Stack:** NVIDIA NeMo Parakeet
+*   **Model Size:** `Parakeet Unified EN 0.6B` (English-only, highly optimized for blazing fast inference)
 *   **Role:** Converts the doctor's clear, single-speaker dictation into text.
-*   **Why it's bulletproof:** Bypasses complex speaker diarization and translation errors. Fast, accurate, and runs effortlessly on edge hardware.
+*   **Why it's bulletproof:** Parakeet is lighter, faster, and more accurate than Whisper for pure English dictation. It bypasses complex speaker diarization and provides near-instantaneous transcription latency.
 
 ## 🛡️ 4. Privacy Layer (The Safety Net)
 *   **Tech Stack:** Microsoft Presidio (Python NLP Library)

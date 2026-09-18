@@ -39,6 +39,6 @@ This is a brilliant pivot. By keeping the doctor in the loop and shifting from a
 
 ## 💻 How to build this in 24 Hours:
 
-*   **Audio Capture & STT:** A simple React frontend where the doctor selects a patient, hits record, and sends audio to a local **Faster-Whisper (small.en)** API.
+*   **Audio Capture & STT:** A simple React frontend where the doctor selects a patient, hits record, and sends audio to a local **NVIDIA Parakeet (0.6B)** API for instant transcription.
 *   **The Database (RAG):** Supabase with `pgvector` to store the patient's past visits.
 *   **The AI Overseer:** Feed the dictation and RAG context into a local LLM with a strict system prompt: *"You are a medical safety reviewer. Output a JSON with: 1. Structured Clinical Note, 2. Historical Drug Interactions, 3. Omission Warnings."*
