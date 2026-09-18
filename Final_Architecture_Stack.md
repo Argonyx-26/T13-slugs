@@ -2,46 +2,44 @@
 
 This document outlines the complete, end-to-end tech stack for the AI Clinical Scribe and Automated Peer Review System. 
 
-**Core Engineering Philosophy:** Zero-Trust Privacy, Edge-Compute Capable, and Modular. By processing audio and PHI (Protected Health Information) locally, we completely bypass standard HIPAA compliance hurdles associated with cloud computing.
+**Core Engineering Philosophy:** High-Speed Dictation, Zero-Trust Privacy, and Modular Edge-Compute. By processing clinical dictation locally, we bypass standard HIPAA compliance hurdles associated with cloud computing.
 
 ---
 
 ## 📱 1. The Edge (Frontend & Audio Capture)
 *   **Tech Stack:** Next.js (Web/PWA) or React Native (Mobile)
-*   **Role:** The doctor's interface. 
-*   **Workflow:** Records the consultation directly to device RAM and transmits an MP3 payload via a secure `multipart/form-data` POST request to our self-hosted backend. *No native voice memo apps are used to prevent unauthorized cloud backups.*
+*   **Role:** The doctor's interface and Identity Manager. 
+*   **Workflow:** The doctor selects the patient (loading the `patient_uuid`). Post-consultation, the doctor records a 30-60 second clinical summary. The app transmits this MP3 payload + UUID via a secure `multipart/form-data` POST request.
 
 ## ⚙️ 2. The Orchestrator (Backend API)
 *   **Tech Stack:** Python + FastAPI
 *   **Role:** The isolated, secure environment where all data processing occurs.
-*   **Workflow:** Receives the MP3, holds it in memory (ephemeral processing), and orchestrates the STT, Privacy, and AI pipelines. Raw audio is never written to a hard drive.
+*   **Workflow:** Receives the MP3 and UUID, holds them in memory (ephemeral processing), and orchestrates the STT, Privacy, and AI pipelines. Raw audio is never written to a hard drive.
 
-## 🎙️ 3. Speech-to-Text (The Audio Pipeline)
+## 🎙️ 3. Speech-to-Text (The Dictation Engine)
 *   **Tech Stack:** `faster-whisper` (OpenAI Whisper optimized via CTranslate2)
-*   **Model Size:** `small.en` (244M parameters, ~850MB RAM)
-*   **Role:** Converts audio to raw text locally.
-*   **Why it's bulletproof:** Uses a 30-second sliding context window to maintain medical context over long consultations. 100% local execution guarantees zero audio bytes leave the private network.
+*   **Model Size:** `small.en` (English-only, highly optimized for speed)
+*   **Role:** Converts the doctor's clear, single-speaker dictation into text.
+*   **Why it's bulletproof:** Bypasses complex speaker diarization and translation errors. Fast, accurate, and runs effortlessly on edge hardware.
 
-## 🛡️ 4. Privacy Layer (The Scrubber)
+## 🛡️ 4. Privacy Layer (The Safety Net)
 *   **Tech Stack:** Microsoft Presidio (Python NLP Library)
-*   **Role:** Anonymizes the transcript.
-*   **Workflow:** Instantly scans the raw text from `faster-whisper` and redacts all PII (Names, SSNs, Addresses) replacing them with safe tags (e.g., `<PERSON>`).
+*   **Role:** Catching accidental PII slips.
+*   **Workflow:** Although doctors are trained not to dictate patient names, this layer scans the transcript just in case, redacting any PII (Names, Addresses) and replacing them with safe tags (e.g., `<PERSON>`).
 
 ## 🧠 5. The RAG Memory System (Embeddings & DB)
 *   **Embedding Model:** `sentence-transformers` (`BAAI/bge-small-en-v1.5`)
 *   **Database:** Supabase + `pgvector` extension
 *   **Role:** Gives the AI "long-term memory" of the patient.
 *   **Workflow:** 
-    1. The local, open-source embedding model converts patient history and current symptoms into vector math (avoiding third-party APIs).
-    2. Supabase stores both standard relational data (Patient profiles) and the vector embeddings.
-    3. During a consultation, `pgvector` performs a semantic search to retrieve relevant past medical history based on the current conversation.
+    1. Patient history is stored as vector embeddings.
+    2. Before analyzing the new dictation, Supabase `pgvector` performs a semantic search to retrieve relevant past medical history for this specific `patient_uuid`.
 
 ## 🤖 6. The Intelligence (AI Overseer)
-We utilize a single, highly specialized open-source model to ensure maximum privacy, operating entirely within our secure infrastructure.
-
-*   **The Local Clinical Brain**
-    *   **Tech Stack:** `OpenBioLLM-14B` (Run locally with strict JSON schema enforcement)
-    *   **Role:** A highly specialized, medical-grade LLM that acts as the sole brain of the system. It processes the scrubbed transcript and RAG context entirely on the local server. It performs clinical extraction, symptom mapping, and risk analysis without any data leaving the firewall, proving our Zero-Trust architecture for the hackathon demo.
+*   **Tech Stack:** `OpenBioLLM-14B` or `Llama-3-8B-Instruct` (Run locally with strict JSON schema enforcement)
+*   **Role:** The clinical safety net and structuring engine.
+*   **Workflow:** Processes the clean dictation alongside the patient's RAG history. It outputs a structured JSON (Symptoms, Prescriptions) and actively flags risks (e.g., "Doctor prescribed Drug A, but patient's history shows allergy to Drug A").
+*   **Final Step:** FastAPI links this JSON back to the `patient_uuid` and saves it to Supabase.
 
 ---
-**Summary for the Pitch:** We have built a system where the "listening" and "scrubbing" are done at the edge (zero trust), the "memory" is semantic (Supabase pgvector), and the "brain" is a fully localized, specialized medical model (OpenBioLLM-14B) ensuring absolutely no PHI leaves the clinic's secure network.
+**Summary for the Pitch:** We have built an incredibly fast, highly accurate clinical dictation system. The frontend handles identity, the backend translates voice to text flawlessly without diarization headaches, and the local AI cross-references the doctor's summary against the patient's history to act as an instant, zero-trust safety net.
