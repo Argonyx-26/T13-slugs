@@ -1,47 +1,48 @@
-# Architecture: Audio Capture to Vetted Transcript
+# Architecture: Audio Dictation to AI Analysis Pipeline
 
-This document outlines the first half of the data pipeline for the AI Clinical Scribe project. 
-**Core Philosophy:** Zero-Trust, 100% Local Data Residency for maximum HIPAA compliance. Patient audio never touches a third-party cloud.
+This document outlines the data pipeline for the Intelligent Clinical Dictation System. 
+**Core Philosophy:** Maximum reliability, low-latency processing, and Zero-Trust Data Residency. By shifting from ambient room recording to post-consultation doctor dictation, we eliminate speaker diarization errors, translation hallucinations, and background noise corruption.
 
-## 1. Mobile App / Edge (Audio Capture & Identity)
+## 1. Mobile App / Edge (The Dictation Interface)
 *   **Role:** The edge entry point for the system and identity management.
-*   **Workflow (Patient-First):** The doctor selects an existing patient or creates a new one *before* recording. This loads a unique `patient_uuid` into the app's memory. 
-*   **Action:** The doctor records the consultation directly into the device's RAM, generating an MP3 file.
-*   **Tech Stack:** React Native, Flutter, or Next.js PWA.
-*   **Security/Privacy Pitch:** We do *not* use native voice memo apps to avoid automatic syncing to consumer clouds (iCloud/Google Drive). 
+*   **Workflow:** 
+    1. The doctor selects the patient's profile *before* or *after* the consultation, loading the `patient_uuid` into the app.
+    2. The consultation happens naturally (no recording).
+    3. Once the patient leaves, the doctor hits "Record" and dictates a 30-60 second clinical summary in English.
+*   **Action:** The app records the dictation directly into the device's RAM, generating an MP3 file.
+*   **Tech Stack:** Next.js PWA, React Native, or Flutter.
 
 ## 2. API Transmission
 *   **Role:** Secure transport layer.
 *   **Action:** The mobile app sends a secure `POST` request to our self-hosted backend.
 *   **Format:** `multipart/form-data` upload.
-*   **Crucial Payload:** The payload contains *both* the MP3 file AND the `patient_uuid`.
+*   **Payload:** The MP3 dictation file AND the `patient_uuid`.
 
 ## 3. Self-Hosted Backend (The Orchestrator)
-*   **Role:** The secure, isolated environment where all audio processing occurs.
+*   **Role:** The isolated environment where all audio processing occurs.
 *   **Tech Stack:** Python + FastAPI.
-*   **Security/Privacy Pitch:** FastAPI receives the payload and holds the MP3 and `patient_uuid` purely in memory. The raw audio is *never* written to a physical hard drive, database, or external S3 bucket.
+*   **Workflow:** FastAPI holds the MP3 and `patient_uuid` purely in RAM. It orchestrates the pipeline sequentially without writing raw audio to a physical disk.
 
-## 4. Local Speech-to-Text & Diarization (The Audio Engine)
-*   **Role:** Transcribing multilingual medical jargon and identifying speakers accurately on local hardware.
-*   **Tech Stack:** **WhisperX** (A pipeline orchestrating `faster-whisper` and `pyannote.audio`).
-*   **Specs Locked In:** 
-    *   **Model:** `medium` or `large-v3-turbo` (Requires ~1.5GB+ VRAM but crucial for regional language accuracy).
-    *   **Multilingual Translation:** Runs with `task="translate"`. It automatically detects regional languages (like Kannada) or code-mixed audio and outputs a standardized **English** transcript in one pass.
-    *   **Speaker Diarization:** Uses `pyannote.audio` under the hood to map out exactly who is speaking, outputting segmented text (e.g., `Speaker A` vs `Speaker B`). This solves the "noisy Indian clinic" overlapping voice problem.
+## 4. Local Speech-to-Text (The Audio Engine)
+*   **Role:** Transcribing clear, single-speaker medical dictation with extreme speed and accuracy.
+*   **Tech Stack:** **`faster-whisper`** (Optimized with CTranslate2).
+*   **Specs:** 
+    *   **Model:** `small.en` or `medium.en` (English-only models).
+    *   **Why it's flawless:** Because the input is a single, clear voice speaking English close to a microphone, the STT will achieve near 100% accuracy. We completely bypass the need for heavy speaker diarization (WhisperX) or complex translation alignments. 
+    *   **Resource Utilization:** Highly efficient (~850MB to 1.5GB VRAM), capable of running on standard edge hardware instantly.
 
-## 5. Local Privacy Scrubbing (The Vetting Process)
-*   **Role:** Ensuring the transcript is HIPAA-compliant before any external AI analysis.
-*   **Action:** The raw, diarized English transcript is instantly passed through a Natural Language Processing (NLP) privacy filter.
-*   **Tech Stack:** **Microsoft Presidio** (Python library running locally on the FastAPI server).
-*   **How it Works:** Presidio automatically detects Personally Identifiable Information (PII) such as patient names, phone numbers, and locations, replacing them with generic tags (e.g., `<PERSON>`).
+## 5. Local Privacy Safety Net
+*   **Role:** Catching accidental slips. Doctors are trained not to dictate PII, but humans make mistakes.
+*   **Tech Stack:** **Microsoft Presidio** (Python NLP library).
+*   **Action:** A fast safety scan of the English transcript. If the doctor accidentally dictates, "John came in today with...", Presidio instantly scrubs "John" to `<PERSON>`.
 
 ## 6. AI Processing & Database Re-Linking
-*   **Role:** Extracting clinical value and mapping it back to the correct patient without exposing PII.
+*   **Role:** Structuring the raw dictation and mapping it to the database.
 *   **Workflow:**
-    1. The Orchestrator sends the *anonymized* `Speaker A/B` transcript to the AI Overseer (LLM).
-    2. The LLM uses a strict prompt to deduce which speaker is the Doctor vs. Patient and extracts the clinical summary and risk flags into a JSON object.
-    3. The Orchestrator receives this JSON, retrieves the `patient_uuid` it was holding in RAM, attaches it to the JSON, and writes it directly to the database.
-*   **The Pitch:** The AI model never sees the patient's real name, guaranteeing privacy. The database remains perfectly organized because the Orchestrator safely bridges the gap.
+    1. FastAPI sends the clean dictation transcript to the local AI Overseer (LLM).
+    2. The LLM converts the unstructured paragraph into a structured JSON medical record (Symptoms, Diagnosis, Prescriptions).
+    3. *Crucial:* The LLM performs active analysis (e.g., checking the dictated prescriptions against the patient's historical RAG data for drug interactions or flagging if the doctor forgot to mention ordering a vital lab test).
+    4. FastAPI attaches the `patient_uuid` to this JSON and saves it to the database.
 
 ---
-**Pipeline Output:** A highly accurate, speaker-diarized, fully anonymized text string mapped flawlessly to a database UUID, ready for the core AI Overseer.
+**Pipeline Output:** A perfectly accurate, structured clinical note with AI-generated risk alerts, instantly mapped to the correct patient profile.
