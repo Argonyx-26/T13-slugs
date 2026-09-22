@@ -5,8 +5,12 @@
 *   **Workflow:** The microphone stays on for the entire 10-15 minute consultation. The app compresses the audio (to MP3/WebM) and sends it to the FastAPI backend.
 
 ## 2. STT, Language ID, & Diarization (The Heavy Lifter)
-*   **Option A (Fastest for Hackathon/API):** **Sarvam AI API** or **Bhashini API**. Sarvam is explicitly built for Indian language code-switching (Kannada + English). 
-*   **Option B (Open Source/Local):** **WhisperX**. Combines `Whisper large-v3` with `pyannote.audio` for speaker diarization.
+*   **Selected Stack:** **WhisperX** (Open Source) running on Podman GPU containers.
+*   **Why WhisperX?**
+    *   **STT Engine:** Uses `openai/whisper-large-v3`, which leverages massive multilingual training data to gracefully handle rapid Kannada-English code-switching.
+    *   **Context Preservation:** We will use an `initial_prompt` to bias the model towards medical context and expect Kanglish.
+    *   **Diarization:** Natively wraps `pyannote.audio` for precise speaker labels (`SPEAKER_00`, `SPEAKER_01`) and word-level timestamps.
+    *   **Performance:** Runs via `faster-whisper` (CTranslate2), making it incredibly fast and memory-efficient on rented GPUs.
 *   **Output:** Diarized transcript (e.g., `[Speaker 1]: ...`, `[Speaker 2]: ...`).
 
 ## 3. Translation & Medical Extraction (The Central Brain)
@@ -21,4 +25,4 @@
 *   **Stack:** Supabase + `pgvector` (or ChromaDB for quick local setup).
 *   **Workflow:** The scrubbed JSON summary is converted into vector embeddings (`BAAI/bge-small-en-v1.5`) and saved to the database under the `patient_uuid`.
 
-**Hackathon Note:** Use APIs (Sarvam/AssemblyAI) for transcription/diarization to save time and hardware resources unless a powerful GPU is available.
+**Hackathon Note:** We have opted for a 100% Free & Open Source (FOSS) self-hosted architecture via rented GPUs in Podman. This guarantees Zero-Trust privacy for clinical audio and avoids recurring third-party API costs.
