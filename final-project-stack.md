@@ -60,3 +60,4 @@ The AI Clinical Scribe is a safety-first clinical analytical assistant designed 
     1. The scrubbed English JSON is embedded and stored in the Vector DB with `patient_uuid` metadata tags.
     2. During future visits, the Central Brain queries this Vector DB to give the AI "long-term memory" of the patient's history.
     3. The system handles conflicting data via strict precedence rules and complies with HIPAA through cascading data deletion linked to the UUID.
+*   **Feature - Global Similarity Search:** If a doctor needs to research an old patient, their historical data is already resting in the Vector DB from their last visit and loads instantly. If they are looking for a similar case but forgot the name, our RAG architecture allows them to do a semantic search across the entire clinic's history to instantly find past patients with matching symptom vectors, which is something legacy SQL databases physically cannot do.
