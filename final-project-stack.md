@@ -20,7 +20,7 @@ The AI Clinical Scribe is a safety-first clinical analytical assistant designed 
     4. Processes text and structures JSON.
 
 ## 📱 2. The Edge: Ambient Audio Capture (Mobile App & Web)
-*   **Tech Stack:** Next.js (Web/PWA) or React Native / Flutter (Mobile).
+*   **Tech Stack:** Flutter (Mobile & Web).
 *   **Role:** The doctor's interface and Identity Manager.
 *   **Workflow:**
     1. The doctor selects the patient profile, loading the `patient_uuid`.
