@@ -1,8 +1,10 @@
-"""Five synthetic patients, each with one planted issue, buried among routine records so retrieval has to choose.
+"""Six synthetic patients, each with one planted issue, buried among routine records so retrieval has to choose.
 
 Dates are 'days before seeding'. The consult scripts for the demo audio must match the `consult` blocks.
 `clinical` is what the Brain's first pass should produce: a clinical rewording of the consult. Tested
 (meaning-only ranking): it lifts P-004's HbA1c note from #4 to #2 and P-001's asthma note from #5 to #2 of 17.
+`vitals` are taken at the desk on the consult day; `vitals_history` are earlier readings (days before seeding),
+which the risk engine uses for trends. P-006 is the triage case: the sickest patient, who must jump the queue.
 """
 import random
 
@@ -46,7 +48,8 @@ PATIENTS = [
         "doctor_notes": [],
         "consult": {"symptoms": ["recurrent migraine headaches", "nausea with headaches"],
                     "medications": ["propranolol 40 mg"],
-                    "clinical": ["migraine prophylaxis with a beta-blocker"]},
+                    "clinical": ["migraine prophylaxis with a beta-blocker"],
+                    "vitals": {"resp_rate": 16, "spo2": 98, "systolic_bp": 118, "diastolic_bp": 76, "heart_rate": 78, "temperature_c": 36.8, "consciousness": "alert"}},
     },
     {
         "code": "P-002", "age": 45, "sex": "M",
@@ -62,7 +65,8 @@ PATIENTS = [
         ],
         "consult": {"symptoms": ["facial pain and nasal congestion for ten days", "thick nasal discharge"],
                     "medications": ["Augmentin 625"],
-                    "clinical": ["acute bacterial sinusitis treated with a penicillin antibiotic"]},
+                    "clinical": ["acute bacterial sinusitis treated with a penicillin antibiotic"],
+                    "vitals": {"resp_rate": 16, "spo2": 98, "systolic_bp": 126, "diastolic_bp": 82, "heart_rate": 84, "temperature_c": 37.4, "consciousness": "alert"}},
     },
     {
         "code": "P-003", "age": 67, "sex": "M",
@@ -76,11 +80,13 @@ PATIENTS = [
         ],
         "doctor_notes": [],
         "consult": {"symptoms": ["lower back pain for one week"], "medications": ["ibuprofen 400 mg"],
-                    "clinical": ["NSAID analgesic for back pain"]},
+                    "clinical": ["NSAID analgesic for back pain"],
+                    "vitals": {"resp_rate": 16, "spo2": 98, "systolic_bp": 134, "diastolic_bp": 84, "heart_rate": 88, "temperature_c": 36.7, "consciousness": "alert"}},
     },
     {
         "code": "P-004", "age": 52, "sex": "F",
-        "story": "Borderline HbA1c 6 months ago, only in a lab note (never on the condition list); now always thirsty.",
+        "story": "Borderline HbA1c 6 months ago, only in a lab note (never on the condition list); now always thirsty. "
+                 "Blood pressure has crept up at every visit and she has lost weight: early risk, not an emergency.",
         "records": [
             (182, "lab", "HbA1c 6.2% (borderline, prediabetic range). Fasting glucose 118 mg/dL. "
                          "Lifestyle advice given; recheck HbA1c in 6 months."),
@@ -90,7 +96,11 @@ PATIENTS = [
         "doctor_notes": [],
         "consult": {"symptoms": ["excessive thirst", "frequent urination at night", "tiredness"],
                     "medications": [],
-                    "clinical": ["polydipsia and polyuria, possible hyperglycaemia or diabetes; check blood glucose and HbA1c"]},
+                    "clinical": ["polydipsia and polyuria, possible hyperglycaemia or diabetes; check blood glucose and HbA1c"],
+                    "vitals": {"resp_rate": 16, "spo2": 98, "systolic_bp": 148, "diastolic_bp": 94, "heart_rate": 84,
+                               "temperature_c": 36.8, "consciousness": "alert", "blood_glucose": 232, "weight_kg": 69.5}},
+        "vitals_history": [(400, {"systolic_bp": 128, "diastolic_bp": 82, "heart_rate": 76, "weight_kg": 74.0}),
+                           (182, {"systolic_bp": 136, "diastolic_bp": 86, "heart_rate": 80, "weight_kg": 74.0})],
     },
     {
         "code": "P-005", "age": 28, "sex": "M",
@@ -100,7 +110,26 @@ PATIENTS = [
         ],
         "doctor_notes": [],
         "consult": {"symptoms": ["runny nose", "sore throat", "mild fever"], "medications": ["paracetamol 650 mg"],
-                    "clinical": ["upper respiratory tract infection"]},
+                    "clinical": ["upper respiratory tract infection"],
+                    "vitals": {"resp_rate": 16, "spo2": 98, "systolic_bp": 118, "diastolic_bp": 74, "heart_rate": 88, "temperature_c": 37.9, "consciousness": "alert"}},
+    },
+    {
+        "code": "P-006", "age": 61, "sex": "M",
+        "story": "Diabetic with an infected heel ulcer; now fever, chills and new confusion. The triage case: "
+                 "vital signs at check-in must put him at the top of the queue as possible sepsis.",
+        "records": [
+            (3000, "diagnosis", "Type 2 diabetes mellitus."),
+            (90, "prescription", "Metformin 500 mg twice daily (long-term)."),
+            (10, "visit", "Diabetic foot check: small ulcer on the left heel, cleaned and dressed. Review in one week."),
+            (1500, "allergy", "No known drug allergies."),
+        ],
+        "doctor_notes": [],
+        "consult": {"symptoms": ["fever with chills since yesterday", "confusion since this morning",
+                                 "redness and pus from the heel wound"],
+                    "medications": [],
+                    "clinical": ["infected diabetic foot ulcer with systemic infection"],
+                    "vitals": {"resp_rate": 24, "spo2": 94, "systolic_bp": 94, "diastolic_bp": 58, "heart_rate": 118,
+                               "temperature_c": 38.9, "consciousness": "new_confusion", "blood_glucose": 240}},
     },
 ]
 

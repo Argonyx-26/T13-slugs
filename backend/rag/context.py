@@ -13,8 +13,12 @@ from .models import Conflict, Fact, Match, PatientContext
 
 KIND = {"allergy": "allergy", "allergies": "allergy", "diagnosis": "diagnosis",
         "prescription": "prescription", "prescriptions": "prescription"}
-NO_ALLERGY = re.compile(r"\b(no known|nkda|none known|no drug allerg|no allerg)", re.I)
-MAX_PRESCRIPTIONS = 10
+NO_ALLERGY = re.compile(r"\b(no known|nkda|nka\b|none known|no drug allerg|no allerg|denies (any )?(drug )?allerg)",
+                        re.I)
+# An allergy entry that is ONLY "unknown" / "none mentioned" / "not asked" says nothing either way. It is left out, so
+# it neither reads as an allergy (a false conflict) nor as "none" (hiding that nobody asked).
+UNKNOWN_ALLERGY = re.compile(r"^\W*(unknown|not (asked|assessed|discussed|mentioned|recorded|stated)|"
+                             r"none (mentioned|reported|discussed|stated)|n/?a)\W*$", re.I)
 KEYWORD_BONUS = 0.05
 MIN_RELATIVE_SCORE = 0.25   # tuned on the 5 demo patients: the lowest cut that still drops most filler;
                              # 0.35+ lost the HbA1c and asthma notes when the Brain gives no clinical rewording
@@ -29,16 +33,24 @@ def _days_ago(recorded_at: str) -> int:
     return (datetime.now(timezone.utc) - datetime.fromisoformat(recorded_at)).days
 
 
+def says_no_allergy(text: str) -> bool:
+    """True only if every part of the entry is a 'no allergies' statement. A doctor's note joins its list with '; ',
+    so 'Penicillin (rash); no known food allergies' is a real allergy, not a 'none'."""
+    parts = [p for p in re.split(r"[;\n]", text) if p.strip()]
+    return bool(parts) and all(NO_ALLERGY.search(p) for p in parts)
+
+
 def _facts(patient_id: str) -> list[Fact]:
-    facts, n_rx = [], 0
+    """Every allergy, diagnosis and prescription, uncapped: a cap drops the oldest first, and the oldest prescription
+    is usually the long-term one (warfarin from registration, pushed out by ten antibiotic courses). A prescription
+    leaves this list only when the clinic marks it stopped (store.retract_clinic_record)."""
+    facts = []
     for row in store.safety_chunks(patient_id):  # newest first
-        kind = KIND[row["section"]]
-        if kind == "prescription":
-            n_rx += 1
-            if n_rx > MAX_PRESCRIPTIONS:
-                continue
-        facts.append(Fact(chunk_id=row["id"], kind=kind, tier=row["tier"],
-                          text=_text(row["content"]), recorded_at=row["recorded_at"][:10]))
+        kind, text = KIND[row["section"]], _text(row["content"])
+        if kind == "allergy" and UNKNOWN_ALLERGY.match(text):
+            continue
+        facts.append(Fact(chunk_id=row["id"], kind=kind, tier=row["tier"], text=text,
+                          recorded_at=row["recorded_at"][:10]))
     return facts
 
 
@@ -46,8 +58,8 @@ def find_conflicts(facts: list[Fact]) -> list[Conflict]:
     """A 'no known allergies' record next to a real allergy is flagged, never silently overridden:
     the allergy stays in the safety facts either way."""
     allergies = [f for f in facts if f.kind == "allergy"]
-    none_says = [f for f in allergies if NO_ALLERGY.search(f.text)]
-    real = [f for f in allergies if not NO_ALLERGY.search(f.text)]
+    none_says = [f for f in allergies if says_no_allergy(f.text)]
+    real = [f for f in allergies if not says_no_allergy(f.text)]
     if not (none_says and real):
         return []
     who = {"clinic": "clinic record", "doctor": "doctor's note"}
@@ -66,6 +78,7 @@ def get_context(patient_id: str, symptoms: list[str], medications: list[str],
     extra_queries: optional clinical rewordings from the Brain (e.g. 'polydipsia, possible hyperglycaemia'),
     which retrieve better than lay phrasing."""
     patient = store.get_patient(patient_id)
+    store.ensure_indexed(patient_id)   # a record saved but never indexed would otherwise be missing from the facts
     facts = _facts(patient_id)
     fact_ids = {f.chunk_id for f in facts}
 

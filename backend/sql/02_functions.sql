@@ -89,7 +89,14 @@ begin
   if coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') <> 'receptionist' then
     raise exception 'Only a receptionist can delete clinic records';
   end if;
-  delete from patients where id = p_patient_id;   -- cascades to every table
+  -- Who deleted whom stays behind in audit_log (05_safety_fixes.sql), which has no foreign key to patients
+  insert into audit_log (actor, action, patient_code, detail)
+  select coalesce(auth.jwt() ->> 'email', auth.uid()::text, 'unknown'), 'patient_deleted', p.display_code,
+         jsonb_build_object('patient_id', p.id,
+                            'clinic_records', (select count(*) from clinic_records c where c.patient_id = p.id),
+                            'doctor_notes',   (select count(*) from doctor_notes d where d.patient_id = p.id))
+  from patients p where p.id = p_patient_id;
+  delete from patients where id = p_patient_id;   -- cascades to every table except audit_log
 end;
 $$;
 

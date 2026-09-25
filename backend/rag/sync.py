@@ -6,15 +6,14 @@ Run it after changing EMBED_MODEL. Upserts by (tier, source_id, section), so run
 """
 from . import chunks as ch
 from .db import service as sb
-from .store import index
+from .store import active_clinic_records, index
 
 
 def reindex(patient_ids: list[str] | None = None) -> int:
-    records = sb.table("clinic_records").select("*")
     notes = sb.table("doctor_notes").select("*").eq("status", "approved")
     if patient_ids is not None:
-        records, notes = records.in_("patient_id", patient_ids), notes.in_("patient_id", patient_ids)
-    todo = [c for r in records.execute().data for c in ch.from_clinic_record(r)]
+        notes = notes.in_("patient_id", patient_ids)
+    todo = [c for r in active_clinic_records(patient_ids) for c in ch.from_clinic_record(r)]   # retracted ones stay out
     todo += [c for n in notes.execute().data for c in ch.from_doctor_note(n)]
     index(todo)
     return len(todo)

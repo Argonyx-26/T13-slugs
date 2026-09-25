@@ -52,6 +52,25 @@ def keyword_query(text: str) -> str:
     return " or ".join(words)
 
 
+def active_clinic_records(patient_ids: list[str] | None = None) -> list[dict]:
+    """Clinic records still in force (not retracted as entered in error or stopped)."""
+    return sb.rpc("active_clinic_records", {"p_patient_ids": patient_ids}).execute().data
+
+
+def ensure_indexed(patient_id: str) -> int:
+    """Indexes any of the patient's records missing from the search index, e.g. when indexing failed right after a
+    save. Safety facts are read from the index, so this runs before every consult: an allergy saved but never
+    indexed is picked up here, and if the embedder is down the consult fails loudly instead of leaving it out.
+    Returns how many chunks were added."""
+    have = {r["source_id"] for r in
+            sb.table("memory_chunks").select("source_id").eq("patient_id", patient_id).execute().data}
+    notes = sb.table("doctor_notes").select("*").eq("patient_id", patient_id).eq("status", "approved").execute().data
+    todo = [c for r in active_clinic_records([patient_id]) if r["id"] not in have for c in ch.from_clinic_record(r)]
+    todo += [c for n in notes if n["id"] not in have for c in ch.from_doctor_note(n)]
+    index(todo)
+    return len(todo)
+
+
 def search(patient_id: str, query: str, k: int = 8) -> list[dict]:
     """Hybrid (meaning + keyword) search over one patient's clinic records and approved doctor notes."""
     return sb.rpc("search_patient_memory", {
@@ -93,6 +112,14 @@ def add_clinic_records(records: list[dict]) -> list[dict]:
     return stored
 
 
+def retract_clinic_record(record_id: str, reason: str, by: str, note: str | None = None) -> dict:
+    """The clinic tier's only correction: reason 'entered_in_error' (a typo, the wrong box ticked) or, for a
+    prescription, 'stopped'. The record leaves the search index and the safety facts in the same transaction but
+    stays in the database, and the retraction is written to audit_log. `by` is the logged-in person's email."""
+    return sb.rpc("retract_clinic_record", {"p_record_id": record_id, "p_reason": reason,
+                                            "p_by": by, "p_note": note}).execute().data
+
+
 # ---------- Tier 2: doctor notes (AI output is a draft until approved) ----------
 def save_draft_note(patient_id: str, note_json: dict) -> dict:
     """After the Central Brain + Presidio. Drafts are not searchable."""
@@ -102,22 +129,30 @@ def save_draft_note(patient_id: str, note_json: dict) -> dict:
 
 def update_draft_note(note_id: str, note_json: dict) -> dict:
     """The doctor edits the draft before approving."""
-    return (sb.table("doctor_notes").update({"note_json": note_json})
-            .eq("id", note_id).eq("status", "draft").execute().data[0])
+    rows = (sb.table("doctor_notes").update({"note_json": note_json})
+            .eq("id", note_id).eq("status", "draft").execute().data)
+    if not rows:
+        raise ValueError(f"Note {note_id} is not a draft (already approved, or deleted)")
+    return rows[0]
 
 
-def approve_note(note_id: str) -> dict:
-    """The doctor clicked Approve: only now does the note become patient memory."""
-    note = (sb.table("doctor_notes")
-            .update({"status": "approved", "approved_at": datetime.now(timezone.utc).isoformat()})
-            .eq("id", note_id).execute().data[0])
-    index(ch.from_doctor_note(note))
-    return note
+def approve_note(note_id: str, approved_by: str) -> dict:
+    """The doctor clicked Approve: only now does the note become patient memory. `approved_by` is the doctor's email
+    (from require_role), kept on the note for who signed it off."""
+    rows = (sb.table("doctor_notes")
+            .update({"status": "approved", "approved_at": datetime.now(timezone.utc).isoformat(),
+                     "approved_by": approved_by})
+            .eq("id", note_id).eq("status", "draft").execute().data)
+    if not rows:
+        raise ValueError(f"Note {note_id} is not a draft (already approved, or deleted)")
+    # If indexing fails here, ensure_indexed() picks the note up before the patient's next consult
+    index(ch.from_doctor_note(rows[0]))
+    return rows[0]
 
 
-def delete_doctor_note(note_id: str):
-    sb.table("memory_chunks").delete().eq("tier", "doctor").eq("source_id", note_id).execute()
-    sb.table("doctor_notes").delete().eq("id", note_id).execute()
+def delete_doctor_note(note_id: str) -> bool:
+    """Deletes the note and its search rows in one transaction. False for an unknown note."""
+    return sb.rpc("delete_doctor_note", {"p_note_id": note_id}).execute().data
 
 
 def clear_doctor_memory(patient_id: str) -> int:
@@ -130,6 +165,21 @@ def login(email: str, password: str) -> dict:
     """Returns the access token and role. Flutter sends the token back on each request."""
     res = public().auth.sign_in_with_password({"email": email, "password": password})
     return {"token": res.session.access_token, "role": (res.user.app_metadata or {}).get("role")}
+
+
+def current_user(access_token: str) -> dict:
+    """Asks Supabase whether the token is valid (not just decoding it) -> {id, email, role}."""
+    user = public().auth.get_user(access_token).user
+    return {"id": user.id, "email": user.email, "role": (user.app_metadata or {}).get("role")}
+
+
+def require_role(access_token: str, *roles: str) -> dict:
+    """FastAPI's gate for everything the backend key does on someone's behalf: the database itself only checks roles
+    for receptionist_delete_patient. Raises PermissionError (-> 403) for any other role."""
+    user = current_user(access_token)
+    if user["role"] not in roles:
+        raise PermissionError(f"This needs a {' or '.join(roles)} login")
+    return user
 
 
 def receptionist_delete_patient(access_token: str, patient_id: str):

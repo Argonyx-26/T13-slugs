@@ -9,7 +9,7 @@ create extension if not exists vector;
 -- ---------- Tier 1: clinic ----------
 create table if not exists patients (
   id           uuid primary key default gen_random_uuid(),
-  display_code text not null unique,          -- e.g. P-004; no names are stored anywhere
+  display_code text not null unique,          -- e.g. P-004; names live only in patient_identity (04_reception.sql)
   age          int check (age between 0 and 130),
   sex          text,
   created_at   timestamptz not null default now()
@@ -49,13 +49,12 @@ create table if not exists memory_chunks (
   source_id   uuid not null,                  -- clinic_records.id or doctor_notes.id
   section     text not null,                  -- record_type for clinic, note section for doctor
   content     text not null,                  -- 'YYYY-MM-DD | section | text'
-  embedding   vector(384) not null,           -- MedEmbed-small / bge-small size
+  embedding   vector(384) not null,           -- MedEmbed-small / bge-small size; searched exactly, no ANN index (05)
   fts         tsvector generated always as (to_tsvector('english', content)) stored,
   recorded_at timestamptz not null,
   unique (tier, source_id, section)           -- re-indexing never creates duplicates
 );
 create index if not exists memory_chunks_patient_idx on memory_chunks (patient_id);
-create index if not exists memory_chunks_embedding_idx on memory_chunks using hnsw (embedding vector_cosine_ops);
 create index if not exists memory_chunks_fts_idx on memory_chunks using gin (fts);
 
 -- ---------- Permissions ----------

@@ -1,0 +1,91 @@
+{
+  "_note": "Red-flag symptom patterns for rag/risk.py. Demo coverage for a hackathon, not a validated clinical tool. Terms match the START of a word in the consult's English symptoms ('breathless' matches 'breathlessness'). A rule fires when every group in 'all' has a match. 'any' raises it to 'level'; without an 'any' match it fires at 'else_level', or not at all if there is none. 'history' raises it to history.level when the patient's safety facts or retrieved records mention a term. Measured temperature >= 38 C counts as the symptom 'fever'.",
+  "rules": [
+    {"id": "cardiac_chest_pain", "title": "Possible heart attack", "level": "critical", "else_level": "high",
+     "all": [["chest pain", "chest pressure", "chest tightness", "chest discomfort", "chest heaviness", "pain in chest", "pain in the chest"]],
+     "any": ["sweat", "breathless", "shortness of breath", "difficulty breathing", "radiat", "spreading", "left arm", "jaw", "nausea", "vomit", "faint", "dizz"],
+     "history": {"terms": ["diabetes", "hypertension", "coronary", "angina", "heart attack", "myocardial", "smok"],
+                 "level": "critical", "reason": "Heart risk factor on record"},
+     "action": "Emergency: ECG now if available, keep the patient at rest, and arrange hospital transfer unless a heart attack is ruled out."},
+
+    {"id": "stroke", "title": "Possible stroke", "level": "critical",
+     "all": [["face droop", "facial droop", "drooping face", "drooping of face", "weakness on one side", "one-sided weakness", "one sided weakness",
+              "numbness on one side", "arm weakness", "weakness in arm", "leg weakness", "weakness in leg", "slurred speech", "difficulty speaking",
+              "trouble speaking", "sudden vision loss", "loss of vision", "sudden confusion"]],
+     "action": "Emergency: note the time the symptoms started and transfer to a hospital with a stroke unit now."},
+
+    {"id": "thunderclap_headache", "title": "Possible bleed in the brain", "level": "critical",
+     "all": [["worst headache", "sudden severe headache", "thunderclap"]],
+     "action": "Emergency: a sudden, severe headache needs hospital assessment now."},
+
+    {"id": "meningitis", "title": "Possible meningitis", "level": "critical",
+     "all": [["fever", "high temperature"],
+             ["stiff neck", "neck stiffness", "rash that does not fade", "non-blanching rash", "sensitivity to light", "photophobia"]],
+     "action": "Emergency: transfer to hospital now."},
+
+    {"id": "anaphylaxis", "title": "Possible severe allergic reaction (anaphylaxis)", "level": "critical", "else_level": "high",
+     "all": [["lip swelling", "swelling of lips", "swelling of the lips", "swollen lips", "tongue swelling", "swollen tongue", "throat swelling",
+              "throat tightness", "face swelling", "swelling of face", "swollen face"]],
+     "any": ["breathless", "shortness of breath", "difficulty breathing", "wheez", "hives", "rash", "dizz", "faint"],
+     "action": "Emergency: follow the clinic's anaphylaxis protocol and arrange transfer."},
+
+    {"id": "severe_breathing", "title": "Severe breathing difficulty", "level": "critical",
+     "all": [["unable to speak", "cannot speak in full sentences", "can't speak in full sentences", "blue lips", "severe breathlessness", "gasping"]],
+     "action": "Emergency: check oxygen saturation now and arrange transfer."},
+
+    {"id": "breathless", "title": "Breathlessness", "level": "medium",
+     "all": [["breathless", "shortness of breath", "difficulty breathing", "wheez"]],
+     "action": "Check oxygen saturation and breathing rate (they drive the NEWS2 score)."},
+
+    {"id": "gi_bleed", "title": "Possible bleeding from the gut", "level": "high",
+     "all": [["vomiting blood", "blood in vomit", "black stool", "tarry stool", "blood in stool", "rectal bleeding", "passing blood"]],
+     "history": {"terms": ["warfarin", "acenocoumarol", "apixaban", "rivaroxaban", "dabigatran", "heparin", "clopidogrel", "anticoagulant", "blood thinner"],
+                 "level": "critical", "reason": "On a blood thinner"},
+     "action": "Urgent: check pulse and blood pressure, and arrange same-day hospital assessment."},
+
+    {"id": "head_injury", "title": "Head injury", "level": "medium",
+     "all": [["head injury", "hit my head", "hit his head", "hit her head", "hit the head", "fell and hit", "head trauma"]],
+     "history": {"terms": ["warfarin", "acenocoumarol", "apixaban", "rivaroxaban", "dabigatran", "heparin", "clopidogrel", "anticoagulant", "blood thinner"],
+                 "level": "critical", "reason": "On a blood thinner"},
+     "action": "Watch for drowsiness, vomiting or a worsening headache. A head injury on a blood thinner needs a CT scan."},
+
+    {"id": "self_harm", "title": "Risk of self-harm", "level": "critical",
+     "all": [["suicid", "self-harm", "self harm", "kill myself", "end my life", "want to die", "wants to die"]],
+     "action": "Do not leave the patient alone. Urgent mental health assessment today."},
+
+    {"id": "pregnancy_warning", "title": "Warning sign in pregnancy", "level": "critical",
+     "all": [["pregnan"],
+             ["bleeding", "severe abdominal pain", "severe headache", "blurred vision", "swelling of face", "swollen face", "swollen hands",
+              "reduced fetal movement", "baby moving less", "fits", "seizure", "convulsion"]],
+     "action": "Emergency: arrange obstetric assessment now."},
+
+    {"id": "seizure", "title": "Seizure", "level": "high",
+     "all": [["seizure", "fits", "convulsion", "fitting"]],
+     "action": "Urgent: check blood sugar. A first or prolonged seizure needs hospital assessment."},
+
+    {"id": "fainting", "title": "Fainting", "level": "medium",
+     "all": [["faint", "passed out", "loss of consciousness", "blackout", "blacked out"]],
+     "history": {"terms": ["heart failure", "atrial fibrillation", "arrhythmia", "pacemaker", "heart attack", "aortic stenosis"],
+                 "level": "high", "reason": "Heart condition on record"},
+     "action": "Check pulse, blood pressure and blood sugar, and an ECG if available."},
+
+    {"id": "haemoptysis", "title": "Coughing blood", "level": "high",
+     "all": [["coughing blood", "coughing up blood", "blood in sputum", "blood in phlegm"]],
+     "action": "Urgent: same-day assessment with a chest X-ray."},
+
+    {"id": "tuberculosis", "title": "Possible tuberculosis", "level": "medium",
+     "all": [["cough"], ["night sweat", "weight loss", "losing weight", "lost weight", "coughing blood", "blood in sputum", "for weeks", "for 2 weeks",
+                         "for two weeks", "for 3 weeks", "for three weeks", "for a month"]],
+     "action": "Sputum test for TB and a chest X-ray, as per the national TB programme."},
+
+    {"id": "diabetes_symptoms", "title": "Possible high blood sugar (diabetes)", "level": "medium",
+     "all": [["thirst", "polydipsia", "drinking a lot"], ["urinat", "polyuria", "passing urine", "frequent urine"]],
+     "history": {"terms": ["hba1c", "prediabet", "fasting glucose", "impaired glucose", "blood sugar"],
+                 "level": "medium", "reason": "Earlier blood sugar result on record"},
+     "action": "Check blood glucose now, and HbA1c."},
+
+    {"id": "weight_loss", "title": "Weight loss", "level": "medium",
+     "all": [["weight loss", "losing weight", "lost weight"]],
+     "action": "Ask whether it is intended. If not, compare with earlier weights and look for a cause (diabetes, thyroid, TB)."}
+  ]
+}

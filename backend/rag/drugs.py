@@ -7,7 +7,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from .context import NO_ALLERGY
+from .context import says_no_allergy
 from .models import PatientContext
 
 DATA = Path(__file__).parent / "data"
@@ -68,7 +68,7 @@ def _allergy_terms(text: str) -> set[str]:
 def safety_hits(medications: list[str], ctx: PatientContext) -> list[dict]:
     """Rule-based findings for today's medicines: allergy conflicts and known interactions."""
     _, _, rules = _tables()
-    allergies = [f for f in ctx.safety_facts if f.kind == "allergy" and not NO_ALLERGY.search(f.text)]
+    allergies = [f for f in ctx.safety_facts if f.kind == "allergy" and not says_no_allergy(f.text)]
     diagnoses = [f for f in ctx.safety_facts if f.kind == "diagnosis"]
     current = [f for f in ctx.safety_facts if f.kind == "prescription"]
     hits = []

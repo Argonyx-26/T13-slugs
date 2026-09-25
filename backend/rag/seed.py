@@ -1,4 +1,4 @@
-"""Loads the five demo patients into Supabase and indexes their records. Safe to re-run.
+"""Loads the six demo patients into Supabase and indexes their records. Safe to re-run.
 
     cd backend && python -m rag.seed
 
@@ -30,7 +30,7 @@ def seed() -> dict[str, str]:
     ids = {r["display_code"]: r["id"] for r in sb.table("patients").select("id, display_code")
            .in_("display_code", [p["code"] for p in PATIENTS]).execute().data}
 
-    records, notes = [], []
+    records, notes, vitals = [], [], []
     for p in PATIENTS:
         pid = ids[p["code"]]
         for i, (days, rtype, content) in enumerate(records_for(p)):
@@ -39,13 +39,18 @@ def seed() -> dict[str, str]:
         for i, (days, note_json) in enumerate(p["doctor_notes"]):
             notes.append({"id": _id(p["code"], "note", str(i)), "patient_id": pid, "note_json": note_json,
                           "status": "approved", "created_at": _at(days), "approved_at": _at(days)})
+        for i, (days, reading) in enumerate(p.get("vitals_history", [])):
+            vitals.append({"id": _id(p["code"], "vitals", str(i)), "patient_id": pid, "recorded_by": "seed",
+                           "recorded_at": _at(days), **reading})
     sb.table("clinic_records").upsert(records, on_conflict="id", ignore_duplicates=True).execute()
     if notes:
         sb.table("doctor_notes").upsert(notes, on_conflict="id", ignore_duplicates=True).execute()
+    if vitals:   # append-only, like clinic records: re-runs keep the original readings
+        sb.table("vital_signs").upsert(vitals, on_conflict="id", ignore_duplicates=True).execute()
 
     n_chunks = reindex(list(ids.values()))
     print(f"patients: {len(ids)} | clinic records: {len(records)} | doctor notes: {len(notes)} | "
-          f"chunks indexed: {n_chunks}")
+          f"vital signs: {len(vitals)} | chunks indexed: {n_chunks}")
     return ids
 
 
