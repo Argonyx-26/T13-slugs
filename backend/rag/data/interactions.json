@@ -1,0 +1,25 @@
+{
+  "_note": "Demo coverage only, not a clinical reference. 'drug' is a generic or a class from drug_classes.json. 'with_drug' matches the patient's recorded prescriptions; 'with_condition' matches words in their diagnoses.",
+  "rules": [
+    {"drug": "non-selective beta-blocker", "with_condition": "asthma", "severity": "high",
+     "message": "Non-selective beta-blockers can trigger bronchospasm in asthma."},
+    {"drug": "non-selective beta-blocker", "with_condition": "copd", "severity": "medium",
+     "message": "Non-selective beta-blockers can worsen airway obstruction in COPD."},
+    {"drug": "nsaid", "with_drug": "anticoagulant", "severity": "high",
+     "message": "NSAIDs with an anticoagulant raise the risk of serious bleeding."},
+    {"drug": "nsaid", "with_condition": "kidney", "severity": "high",
+     "message": "NSAIDs can worsen kidney function in chronic kidney disease."},
+    {"drug": "nsaid", "with_condition": "peptic ulcer", "severity": "high",
+     "message": "NSAIDs raise the risk of GI bleeding with a peptic ulcer history."},
+    {"drug": "nsaid", "with_condition": "asthma", "severity": "low",
+     "message": "Some people with asthma are sensitive to NSAIDs (aspirin-exacerbated respiratory disease)."},
+    {"drug": "clarithromycin", "with_drug": "vitamin k antagonist", "severity": "medium",
+     "message": "Clarithromycin can raise INR in patients on warfarin/acenocoumarol; monitor INR."},
+    {"drug": "erythromycin", "with_drug": "vitamin k antagonist", "severity": "medium",
+     "message": "Erythromycin can raise INR in patients on warfarin/acenocoumarol; monitor INR."},
+    {"drug": "fluoroquinolone", "with_drug": "vitamin k antagonist", "severity": "medium",
+     "message": "Fluoroquinolones can raise INR in patients on warfarin/acenocoumarol; monitor INR."},
+    {"drug": "metformin", "with_condition": "kidney", "severity": "medium",
+     "message": "Metformin dosing depends on kidney function; check eGFR."}
+  ]
+}

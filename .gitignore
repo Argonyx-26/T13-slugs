@@ -1,0 +1,14 @@
+# Secrets: Supabase keys and demo passwords
+.env
+*.env
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Local outputs
+*_diarized.json
+.DS_Store

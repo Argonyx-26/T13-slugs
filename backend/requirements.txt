@@ -1,0 +1,6 @@
+# CPU is fine for the embedder. For a CUDA GPU, install torch from pytorch.org first, then the rest.
+torch>=2.4
+sentence-transformers>=5.0
+supabase>=2.20
+python-dotenv>=1.0
+pydantic>=2.7
