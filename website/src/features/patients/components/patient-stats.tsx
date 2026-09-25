@@ -12,7 +12,9 @@ export interface Stat {
 export function StatGrid({ caption, stats }: { caption: string; stats: Stat[] }) {
   return (
     <section className='flex flex-col gap-2' aria-label={caption}>
-      <h2 className='text-muted-foreground text-xs font-medium tracking-wide uppercase'>{caption}</h2>
+      <h2 className='text-muted-foreground text-xs font-medium tracking-wide uppercase'>
+        {caption}
+      </h2>
       <dl className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
         {stats.map((s) => (
           <div key={s.label} className='bg-card flex flex-col gap-1 rounded-2xl border px-4 py-3.5'>
@@ -32,7 +34,8 @@ export function StatGrid({ caption, stats }: { caption: string; stats: Stat[] })
 export function PatientStats({ patients }: { patients: PatientCard[] }) {
   const waiting = patients.filter((p) => p.visitStatus === 'waiting').length;
   const seen = patients.filter((p) => p.visitStatus === 'seen').length;
-  const count = (level: PatientCard['risk']['level']) => patients.filter((p) => p.risk.level === level).length;
+  const count = (level: PatientCard['risk']['level']) =>
+    patients.filter((p) => p.risk.level === level).length;
   const allergyChecks = patients.filter(
     (p) => p.allergy.state === 'conflict' || p.allergy.state === 'unknown'
   ).length;

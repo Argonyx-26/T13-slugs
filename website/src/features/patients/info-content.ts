@@ -24,7 +24,7 @@ export const patientsInfoContent: InfobarContent = {
     {
       title: 'Not a diagnosis',
       description:
-        "Flags describe what may happen and why, from the records. They are not a diagnosis, advice or a treatment recommendation; the doctor makes every clinical decision.",
+        'Flags describe what may happen and why, from the records. They are not a diagnosis, advice or a treatment recommendation; the doctor makes every clinical decision.',
       links: []
     }
   ]

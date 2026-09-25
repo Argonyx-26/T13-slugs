@@ -5,11 +5,16 @@ import { parseAsStringLiteral, useQueryState } from 'nuqs';
 import { useMemo } from 'react';
 import { Icons } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { clinicStatsQueryOptions, patientsQueryOptions } from '../api/queries';
-import { ClinicStats } from './clinic-stats';
+import { patientsQueryOptions } from '../api/queries';
 import { PatientBentoCard, bentoSize } from './patient-bento-card';
 import { PatientStats } from './patient-stats';
 
@@ -17,7 +22,6 @@ const SORTS = ['risk', 'queue'] as const;
 
 export function PatientBentoGrid() {
   const { data } = useSuspenseQuery(patientsQueryOptions());
-  const { data: clinicStats } = useSuspenseQuery(clinicStatsQueryOptions());
   const [query, setQuery] = useQueryState('q', { defaultValue: '', shallow: true });
   const [sort, setSort] = useQueryState(
     'sort',
@@ -41,7 +45,6 @@ export function PatientBentoGrid() {
 
   return (
     <div className='flex flex-col gap-5'>
-      <ClinicStats stats={clinicStats} />
       <PatientStats patients={data.patients} />
 
       <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
@@ -82,7 +85,9 @@ export function PatientBentoGrid() {
               <Icons.search />
             </EmptyMedia>
             <EmptyTitle>No patients match “{query}”</EmptyTitle>
-            <EmptyDescription>Search looks at names, conditions and today’s complaints.</EmptyDescription>
+            <EmptyDescription>
+              Search looks at names, conditions and today’s complaints.
+            </EmptyDescription>
           </EmptyHeader>
           <Button variant='outline' size='sm' onClick={() => void setQuery(null)}>
             Clear search
@@ -92,7 +97,12 @@ export function PatientBentoGrid() {
         <div className='bg-dot-grid -mx-2 rounded-3xl p-2'>
           <div className='grid grid-flow-dense auto-rows-[minmax(11rem,auto)] grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4'>
             {visible.map((patient, i) => (
-              <PatientBentoCard key={patient.id} patient={patient} size={bentoSize(patient)} index={i} />
+              <PatientBentoCard
+                key={patient.id}
+                patient={patient}
+                size={bentoSize(patient)}
+                index={i}
+              />
             ))}
           </div>
         </div>
@@ -105,13 +115,11 @@ export function PatientBentoGridSkeleton() {
   const sizes = ['lg', 'lg', 'md', 'md', 'sm', 'sm', 'sm', 'sm'] as const;
   return (
     <div className='flex flex-col gap-5' role='status' aria-label='Loading patients'>
-      {[0, 1].map((row) => (
-        <div key={row} className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className='bg-muted h-24 animate-pulse rounded-2xl' />
-          ))}
-        </div>
-      ))}
+      <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className='bg-muted h-24 animate-pulse rounded-2xl' />
+        ))}
+      </div>
       <div className='grid auto-rows-[11rem] grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4'>
         {sizes.map((s, i) => (
           <div

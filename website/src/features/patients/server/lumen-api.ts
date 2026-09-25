@@ -183,7 +183,9 @@ function toCard(
     summary: composeSummary(profile, notes),
     conditions: profile.conditions.map((c) => c.value),
     allergy: allergyStatus(profile.allergies),
-    risk: report ? riskSummary(toRisks(report), hasRecords) : { level: 'unknown', label: 'Not assessed yet', count: 0 },
+    risk: report
+      ? riskSummary(toRisks(report), hasRecords)
+      : { level: 'unknown', label: 'Not assessed yet', count: 0 },
     lastRecordOn: newestDate(profile, notes),
     isNew: !hasRecords
   };
@@ -215,11 +217,16 @@ function composeOverview(card: PatientCard, profile: ApiProfile, notes: ApiSaved
     );
   }
   for (const n of notes.slice(0, 2)) {
-    const reviewed = n.source === 'doctor_notes' ? 'confirmed by the doctor' : 'AI scribe, not yet reviewed';
-    paragraphs.push(`Consultation on ${formatDate(n.visit_at.slice(0, 10))} (${reviewed}): ${n.note.summary}`);
+    const reviewed =
+      n.source === 'doctor_notes' ? 'confirmed by the doctor' : 'AI scribe, not yet reviewed';
+    paragraphs.push(
+      `Consultation on ${formatDate(n.visit_at.slice(0, 10))} (${reviewed}): ${n.note.summary}`
+    );
   }
   if (!profile.allergies.length && !notes.length && !profile.conditions.length) {
-    paragraphs.push('There are no previous records for this patient yet. The record builds from the first approved consultation note.');
+    paragraphs.push(
+      'There are no previous records for this patient yet. The record builds from the first approved consultation note.'
+    );
   }
   return paragraphs;
 }
@@ -227,14 +234,32 @@ function composeOverview(card: PatientCard, profile: ApiProfile, notes: ApiSaved
 function composeHistory(profile: ApiProfile, notes: ApiSavedNote[]): HistoryEntry[] {
   const entries: HistoryEntry[] = [
     ...notes.map((n) => ({
-      text: n.note.chief_complaint ? `${n.note.chief_complaint}. ${n.note.summary}` : n.note.summary,
+      text: n.note.chief_complaint
+        ? `${n.note.chief_complaint}. ${n.note.summary}`
+        : n.note.summary,
       source: n.source,
       recorded_on: n.visit_at.slice(0, 10)
     })),
-    ...profile.conditions.map((c) => ({ text: `Condition recorded: ${c.value}${c.note ? ` (${c.note})` : ''}`, source: c.source, recorded_on: c.recorded_on })),
-    ...profile.active_medications.map((m) => ({ text: `Medicine recorded: ${m.value}${m.note ? ` (${m.note})` : ''}`, source: m.source, recorded_on: m.recorded_on })),
-    ...profile.allergies.map((a) => ({ text: `Allergy record: ${a.value}${a.note ? ` (${a.note})` : ''}`, source: a.source, recorded_on: a.recorded_on })),
-    ...profile.labs.map((l) => ({ text: `Lab: ${l.name} ${l.value}`, source: l.source, recorded_on: l.taken_on }))
+    ...profile.conditions.map((c) => ({
+      text: `Condition recorded: ${c.value}${c.note ? ` (${c.note})` : ''}`,
+      source: c.source,
+      recorded_on: c.recorded_on
+    })),
+    ...profile.active_medications.map((m) => ({
+      text: `Medicine recorded: ${m.value}${m.note ? ` (${m.note})` : ''}`,
+      source: m.source,
+      recorded_on: m.recorded_on
+    })),
+    ...profile.allergies.map((a) => ({
+      text: `Allergy record: ${a.value}${a.note ? ` (${a.note})` : ''}`,
+      source: a.source,
+      recorded_on: a.recorded_on
+    })),
+    ...profile.labs.map((l) => ({
+      text: `Lab: ${l.name} ${l.value}`,
+      source: l.source,
+      recorded_on: l.taken_on
+    }))
   ];
   return entries.toSorted((a, b) => (b.recorded_on ?? '').localeCompare(a.recorded_on ?? ''));
 }
@@ -258,7 +283,8 @@ export const lumenApi = {
       })
     );
     return cards.toSorted(
-      (a, b) => RISK_ORDER[a.risk.level] - RISK_ORDER[b.risk.level] || (a.token ?? 99) - (b.token ?? 99)
+      (a, b) =>
+        RISK_ORDER[a.risk.level] - RISK_ORDER[b.risk.level] || (a.token ?? 99) - (b.token ?? 99)
     );
   },
 
@@ -289,6 +315,10 @@ export const lumenApi = {
   },
 
   ask(id: string, question: string): Promise<QAAnswer> {
-    return call<QAAnswer>(`/patients/${id}/ask`, { method: 'POST', body: JSON.stringify({ question }) }, 90_000);
+    return call<QAAnswer>(
+      `/patients/${id}/ask`,
+      { method: 'POST', body: JSON.stringify({ question }) },
+      90_000
+    );
   }
 };

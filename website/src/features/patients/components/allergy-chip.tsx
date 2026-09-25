@@ -17,7 +17,11 @@ export function AllergyChip({
   const config = {
     conflict: { icon: Icons.riskHigh, color: 'var(--risk-high)', text: allergy.label },
     present: { icon: Icons.riskHigh, color: 'var(--risk-high)', text: `Allergy: ${allergy.label}` },
-    unknown: { icon: Icons.riskUnknown, color: 'var(--risk-unknown)', text: 'Allergy status unknown' },
+    unknown: {
+      icon: Icons.riskUnknown,
+      color: 'var(--risk-unknown)',
+      text: 'Allergy status unknown'
+    },
     none: { icon: Icons.shieldCheck, color: 'var(--muted-foreground)', text: allergy.label }
   }[allergy.state];
   const IconComponent = config.icon;

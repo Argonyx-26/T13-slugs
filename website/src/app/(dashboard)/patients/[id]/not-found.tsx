@@ -1,7 +1,13 @@
 import Link from 'next/link';
 import { Icons } from '@/components/icons';
 import { buttonVariants } from '@/components/ui/button';
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty';
 
 export default function PatientNotFound() {
   return (
@@ -12,7 +18,9 @@ export default function PatientNotFound() {
             <Icons.user />
           </EmptyMedia>
           <EmptyTitle>Patient not found</EmptyTitle>
-          <EmptyDescription>This patient is not in the clinic’s records, or has been removed.</EmptyDescription>
+          <EmptyDescription>
+            This patient is not in the clinic’s records, or has been removed.
+          </EmptyDescription>
         </EmptyHeader>
         <Link href='/patients' className={buttonVariants({ variant: 'outline', size: 'sm' })}>
           <Icons.arrowLeft /> All patients

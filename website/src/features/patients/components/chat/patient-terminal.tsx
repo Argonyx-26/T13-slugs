@@ -25,7 +25,9 @@ function banner(patient: PatientRecord, source: DataSource): string[] {
       ? `Loaded ${records} records for ${patient.displayName} (clinic records, doctor notes, AI scribe).`
       : `No previous records for ${patient.displayName} yet.`,
     'I summarise records and research. I do not diagnose or recommend treatment.',
-    ...(source === 'demo' ? ['Demo mode: answers come from the stored record until the backend is connected.'] : [])
+    ...(source === 'demo'
+      ? ['Demo mode: answers come from the stored record until the backend is connected.']
+      : [])
   ];
 }
 
@@ -43,7 +45,9 @@ function messageText(message: PatientChatMessage): string {
 
 /** Answers carry **bold** markdown; a terminal shows it as bright text, not asterisks. */
 function withBold(text: string): ReactNode[] {
-  return text.split(/\*\*(.+?)\*\*/g).map((piece, i) => (i % 2 ? <strong key={i}>{piece}</strong> : piece));
+  return text
+    .split(/\*\*(.+?)\*\*/g)
+    .map((piece, i) => (i % 2 ? <strong key={i}>{piece}</strong> : piece));
 }
 
 function Citations({ items }: { items: Evidence[] }) {
@@ -117,7 +121,8 @@ export function PatientTerminal({ patient, source, className }: PatientTerminalP
           <i />
         </span>
         <span className='terminal-title'>
-          <Icons.terminal className='size-3.5 shrink-0' aria-hidden /> clinical-brain — {patient.displayName}
+          <Icons.terminal className='size-3.5 shrink-0' aria-hidden /> clinical-brain —{' '}
+          {patient.displayName}
         </span>
         <span className='terminal-mode'>{source === 'fastapi' ? 'local' : 'demo'}</span>
       </div>
@@ -143,7 +148,10 @@ export function PatientTerminal({ patient, source, className }: PatientTerminalP
           const citations = message.parts.find((part) => part.type === 'data-citations');
           const typing = status === 'streaming' && message.id === messages.at(-1)?.id;
           return (
-            <div key={message.id} className={cn('term-line', refused ? 'term-refusal' : 'term-answer')}>
+            <div
+              key={message.id}
+              className={cn('term-line', refused ? 'term-refusal' : 'term-answer')}
+            >
               <span className='term-prompt'>{refused ? 'guardrail ›' : 'brain ›'}</span>
               <span className='term-text'>
                 {withBold(text)}
@@ -176,7 +184,13 @@ export function PatientTerminal({ patient, source, className }: PatientTerminalP
 
       <div className='terminal-suggestions'>
         {SUGGESTIONS.map((s) => (
-          <button key={s} type='button' className='term-chip' onClick={() => ask(s)} disabled={busy}>
+          <button
+            key={s}
+            type='button'
+            className='term-chip'
+            onClick={() => ask(s)}
+            disabled={busy}
+          >
             {s}
           </button>
         ))}

@@ -28,7 +28,8 @@ const TOPICS = {
   lab: /\blabs?\b|test|result|level|hba1c|a1c|\binr\b|egfr|kidney|renal|glucose|sugar|cholesterol|ldl|tsh|thyroid|haemoglobin|hemoglobin|\bhb\b|urine|trend/i,
   condition: /condition|chronic|long[- ]term|problem|illness|comorbid/i,
   risk: /risk|concern|worr|watch|flag|alert|danger|safe|interact|contraindicat|careful|avoid|caution|bleed/i,
-  summary: /summar|overview|brief|tell me about|background|recap|who is|history|timeline|last visit|recent|previous/i,
+  summary:
+    /summar|overview|brief|tell me about|background|recap|who is|history|timeline|last visit|recent|previous/i,
   today: /today|reason|complaint|presenting|came in|here for/i
 };
 
@@ -51,7 +52,11 @@ function overlap(q: Set<string>, text: string): number {
   return n;
 }
 
-const cite = (source: Evidence['source'], snippet: string, recorded_on?: string | null): Evidence => ({
+const cite = (
+  source: Evidence['source'],
+  snippet: string,
+  recorded_on?: string | null
+): Evidence => ({
   source,
   snippet,
   recorded_on: recorded_on ?? null
@@ -77,14 +82,17 @@ function allergySection(p: PatientRecord): Section {
     (a) => `- **${a.value}**${a.note ? `: ${a.note}` : ''} (${when(a.source, a.recorded_on)})`
   );
   const disagree =
-    allergies.some((a) => NO_ALLERGY.test(a.value)) && allergies.some((a) => !NO_ALLERGY.test(a.value));
+    allergies.some((a) => NO_ALLERGY.test(a.value)) &&
+    allergies.some((a) => !NO_ALLERGY.test(a.value));
   return {
     text:
       `**Allergies on record**\n${lines.join('\n')}` +
       (disagree
         ? '\n\nThese records **disagree**: one says there are no known allergies while another records an allergy. Treat the allergy as present until the records are reconciled.'
         : ''),
-    citations: allergies.map((a) => cite(a.source, `Allergy: ${a.value}${a.note ? ` - ${a.note}` : ''}`, a.recorded_on))
+    citations: allergies.map((a) =>
+      cite(a.source, `Allergy: ${a.value}${a.note ? ` - ${a.note}` : ''}`, a.recorded_on)
+    )
   };
 }
 
@@ -93,7 +101,9 @@ function medicationSection(p: PatientRecord): Section {
   if (!meds.length) return { text: '**Current medicines:** none are on record.', citations: [] };
   return {
     text: `**Current medicines**\n${meds
-      .map((m) => `- **${m.value}**${m.note ? `, ${m.note}` : ''} (${when(m.source, m.recorded_on)})`)
+      .map(
+        (m) => `- **${m.value}**${m.note ? `, ${m.note}` : ''} (${when(m.source, m.recorded_on)})`
+      )
       .join('\n')}`,
     citations: meds.map((m) => cite(m.source, m.value, m.recorded_on))
   };
@@ -115,16 +125,22 @@ function labSection(p: PatientRecord, q: Set<string>): Section {
   });
   return {
     text: `**Lab results**, oldest to newest\n${lines.join('\n')}`,
-    citations: names.flatMap((n) => byName.get(n)!.map((l) => cite(l.source, `${l.name} ${l.value}`, l.taken_on)))
+    citations: names.flatMap((n) =>
+      byName.get(n)!.map((l) => cite(l.source, `${l.name} ${l.value}`, l.taken_on))
+    )
   };
 }
 
 function conditionSection(p: PatientRecord): Section {
   const conditions = p.profile.conditions;
-  if (!conditions.length) return { text: '**Long-term conditions:** none are on record.', citations: [] };
+  if (!conditions.length)
+    return { text: '**Long-term conditions:** none are on record.', citations: [] };
   return {
     text: `**Long-term conditions**\n${conditions
-      .map((c) => `- **${c.value}**${c.note ? ` (${c.note})` : ''}, recorded ${formatDate(c.recorded_on)}`)
+      .map(
+        (c) =>
+          `- **${c.value}**${c.note ? ` (${c.note})` : ''}, recorded ${formatDate(c.recorded_on)}`
+      )
       .join('\n')}`,
     citations: conditions.map((c) => cite(c.source, c.value, c.recorded_on))
   };
@@ -178,12 +194,17 @@ function searchHistory(p: PatientRecord, q: Set<string>): Section | null {
   const hits = p.history
     .map((h) => ({ h, score: overlap(q, h.text) }))
     .filter((x) => x.score > 0)
-    .toSorted((a, b) => b.score - a.score || (b.h.recorded_on ?? '').localeCompare(a.h.recorded_on ?? ''))
+    .toSorted(
+      (a, b) => b.score - a.score || (b.h.recorded_on ?? '').localeCompare(a.h.recorded_on ?? '')
+    )
     .slice(0, 3);
   if (!hits.length) return null;
   return {
     text: `**Records that match**\n${hits
-      .map(({ h }) => `- ${formatDate(h.recorded_on)} (${sourceLabel(h.source).toLowerCase()}): ${h.text}`)
+      .map(
+        ({ h }) =>
+          `- ${formatDate(h.recorded_on)} (${sourceLabel(h.source).toLowerCase()}): ${h.text}`
+      )
       .join('\n')}`,
     citations: hits.map(({ h }) => cite(h.source, h.text, h.recorded_on))
   };
@@ -193,7 +214,9 @@ export function answerFromRecord(patient: PatientRecord, question: string): QAAn
   if (OPINION_QUESTION.test(question)) return { answer: REFUSAL, refused: true, citations: [] };
 
   const q = tokens(question);
-  const wanted = (Object.keys(TOPICS) as (keyof typeof TOPICS)[]).filter((t) => TOPICS[t].test(question));
+  const wanted = (Object.keys(TOPICS) as (keyof typeof TOPICS)[]).filter((t) =>
+    TOPICS[t].test(question)
+  );
   const sections: Section[] = [];
 
   for (const topic of wanted) {

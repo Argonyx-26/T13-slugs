@@ -125,18 +125,6 @@ export interface PatientByIdResponse {
   source: DataSource;
 }
 
-/** Clinic-wide figures for the stats row. Demo values only: the orchestrator has no stats endpoint yet. */
-export interface ClinicStats {
-  month: string;
-  previousMonth: string;
-  patientsThisMonth: number;
-  patientsLastMonth: number;
-  newPatientsThisMonth: number;
-  consultationsToday: number;
-  seenToday: number;
-  notesAwaitingReview: number;
-}
-
 // ---------- Chat ----------
 
 export interface AnswerMeta {

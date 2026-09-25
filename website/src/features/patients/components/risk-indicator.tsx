@@ -1,5 +1,6 @@
 import type * as React from 'react';
 import { Icons, type Icon } from '@/components/icons';
+import { EnergyMeter } from '@/components/ui/energy-meter';
 import { cn } from '@/lib/utils';
 import type { Likelihood, RiskLevel } from '../api/types';
 
@@ -73,35 +74,35 @@ export function RiskBadge({ level, asLikelihood = false, className }: RiskBadgeP
   );
 }
 
-export function LikelihoodBadge({ likelihood, className }: { likelihood: Likelihood; className?: string }) {
+export function LikelihoodBadge({
+  likelihood,
+  className
+}: {
+  likelihood: Likelihood;
+  className?: string;
+}) {
   return <RiskBadge level={likelihood} asLikelihood className={className} />;
 }
 
-/** Three-step meter. Unfilled steps are a light tint of the same colour, so the track reads as one scale. */
-export function RiskMeter({ level, className }: { level: RiskLevel; className?: string }) {
+/** Three-segment meter that fills one step at a time. Unlit steps are a light tint of the same colour, so the track reads as one scale. */
+export function RiskMeter({
+  level,
+  size = 'sm',
+  className
+}: {
+  level: RiskLevel;
+  size?: 'sm' | 'md';
+  className?: string;
+}) {
   const meta = RISK_META[level];
   return (
-    <div
-      role='img'
-      aria-label={level === 'unknown' ? 'Risk not assessed' : `${meta.label}: ${meta.steps} of 3`}
-      className={cn('flex w-full items-center gap-0.5', className)}
-    >
-      {[0, 1, 2].map((step) => (
-        <span
-          key={step}
-          className={cn('h-1.5 flex-1 rounded-full', level === 'unknown' && 'bg-muted')}
-          style={
-            level === 'unknown'
-              ? undefined
-              : {
-                  background:
-                    step < meta.steps
-                      ? meta.color
-                      : `color-mix(in oklch, ${meta.color} 18%, transparent)`
-                }
-          }
-        />
-      ))}
-    </div>
+    <EnergyMeter
+      value={meta.steps}
+      segments={3}
+      color={meta.color}
+      size={size}
+      label={level === 'unknown' ? 'Risk not assessed' : `${meta.label}: ${meta.steps} of 3`}
+      className={className}
+    />
   );
 }

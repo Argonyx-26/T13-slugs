@@ -13,9 +13,8 @@
 // ============================================================
 
 import { fakePatients } from '@/constants/mock-api-patients';
-import { clinicStats } from '@/constants/mock-clinic-stats';
 import { isLumenApiConfigured, lumenApi } from '../server/lumen-api';
-import type { ClinicStats, PatientByIdResponse, PatientsResponse } from './types';
+import type { PatientByIdResponse, PatientsResponse } from './types';
 
 export async function getPatients(): Promise<PatientsResponse> {
   if (isLumenApiConfigured()) {
@@ -29,9 +28,4 @@ export async function getPatientById(id: string): Promise<PatientByIdResponse> {
     return { patient: await lumenApi.getPatient(id), source: 'fastapi' };
   }
   return { patient: await fakePatients.getPatientById(id), source: 'demo' };
-}
-
-// The orchestrator has no stats endpoint yet, so this is always the demo figures
-export async function getClinicStats(): Promise<ClinicStats> {
-  return clinicStats;
 }

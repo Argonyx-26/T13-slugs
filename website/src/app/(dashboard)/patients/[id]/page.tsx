@@ -22,7 +22,10 @@ export default async function Page({ params }: PageProps) {
   const { id } = await params;
   const queryClient = getQueryClient();
   // Awaited, not prefetched: an unknown id must become a real 404
-  const data = await queryClient.fetchQuery({ ...patientByIdOptions(id), queryFn: () => loadPatient(id) });
+  const data = await queryClient.fetchQuery({
+    ...patientByIdOptions(id),
+    queryFn: () => loadPatient(id)
+  });
   if (!data.patient) notFound();
 
   return (

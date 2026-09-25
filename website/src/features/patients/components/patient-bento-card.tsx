@@ -46,7 +46,8 @@ export function PatientBentoCard({ patient, size, index }: PatientBentoCardProps
     patient.token != null ? `Token ${patient.token}` : null
   ].filter(Boolean);
 
-  const summaryLines = size === 'lg' ? 'line-clamp-4' : size === 'md' ? 'line-clamp-2' : 'line-clamp-3';
+  const summaryLines =
+    size === 'lg' ? 'line-clamp-4' : size === 'md' ? 'line-clamp-2' : 'line-clamp-3';
 
   return (
     <Link
@@ -92,7 +93,12 @@ export function PatientBentoCard({ patient, size, index }: PatientBentoCardProps
         </div>
         <div className='min-w-0 flex-1'>
           <div className='flex items-center gap-2'>
-            <h3 className={cn('truncate font-semibold tracking-tight', size === 'lg' ? 'text-xl' : 'text-base')}>
+            <h3
+              className={cn(
+                'truncate font-semibold tracking-tight',
+                size === 'lg' ? 'text-xl' : 'text-base'
+              )}
+            >
               {patient.displayName}
             </h3>
             {patient.isNew && (
@@ -126,12 +132,17 @@ export function PatientBentoCard({ patient, size, index }: PatientBentoCardProps
             {patient.reasonForVisit}
           </p>
         )}
-        <p className={cn('text-muted-foreground text-sm leading-relaxed', summaryLines)}>{patient.summary}</p>
+        <p className={cn('text-muted-foreground text-sm leading-relaxed', summaryLines)}>
+          {patient.summary}
+        </p>
 
         {size === 'lg' && patient.conditions.length > 0 && (
           <div className='mt-auto flex flex-wrap gap-1.5 pt-2'>
             {patient.conditions.map((c) => (
-              <span key={c} className='bg-muted text-foreground/80 rounded-full px-2.5 py-0.5 text-xs'>
+              <span
+                key={c}
+                className='bg-muted text-foreground/80 rounded-full px-2.5 py-0.5 text-xs'
+              >
                 {c}
               </span>
             ))}
@@ -148,7 +159,9 @@ export function PatientBentoCard({ patient, size, index }: PatientBentoCardProps
                 {size === 'sm' ? RISK_META[patient.risk.level].label : patient.risk.label}
               </span>
               {size !== 'sm' && patient.risk.count > 1 && (
-                <span className='text-muted-foreground shrink-0'>+{patient.risk.count - 1} more</span>
+                <span className='text-muted-foreground shrink-0'>
+                  +{patient.risk.count - 1} more
+                </span>
               )}
             </div>
             <RiskMeter level={patient.risk.level} className='max-w-56' />
@@ -158,7 +171,9 @@ export function PatientBentoCard({ patient, size, index }: PatientBentoCardProps
           </div>
           <span className='text-muted-foreground group-hover/card:text-foreground flex shrink-0 items-center gap-1 text-xs transition-colors'>
             {patient.lastRecordOn && size !== 'sm' && (
-              <span className='hidden sm:inline'>Last record {formatDate(patient.lastRecordOn)}</span>
+              <span className='hidden sm:inline'>
+                Last record {formatDate(patient.lastRecordOn)}
+              </span>
             )}
             <Icons.arrowRight className='size-4 transition-transform duration-300 group-hover/card:translate-x-0.5' />
           </span>

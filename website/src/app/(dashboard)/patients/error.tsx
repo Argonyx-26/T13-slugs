@@ -2,7 +2,13 @@
 
 import { Icons } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty';
 
 export default function PatientsError({ reset }: { error: Error; reset: () => void }) {
   return (
