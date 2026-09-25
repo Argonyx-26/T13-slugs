@@ -514,6 +514,17 @@ export const MOCK_TRIAGE: Record<string, TriageAssessment> = {
     findings: [
       {
         level: 'critical',
+        title: 'Possible sepsis',
+        reasons: [
+          'Infection signs: fever with chills since yesterday, redness and pus from the heel wound, fever (38.9 °C measured)',
+          'Warning signs: breathing rate 24/min, systolic blood pressure 94 mmHg, new confusion'
+        ],
+        action: 'Emergency: sepsis is time-critical. Arrange hospital transfer now.',
+        evidence: [],
+        source: 'vitals'
+      },
+      {
+        level: 'critical',
         title: 'NEWS2 11: high clinical risk',
         reasons: [
           'breathing rate 24/min (+2)',
@@ -526,17 +537,6 @@ export const MOCK_TRIAGE: Record<string, TriageAssessment> = {
         action: 'Emergency assessment now; NEWS2 7+ in hospital triggers the emergency team.',
         evidence: [],
         source: 'news2'
-      },
-      {
-        level: 'critical',
-        title: 'Possible sepsis',
-        reasons: [
-          'Infection signs: fever with chills since yesterday, redness and pus from the heel wound, fever (38.9 °C measured)',
-          'Warning signs: breathing rate 24/min, systolic blood pressure 94 mmHg, new confusion'
-        ],
-        action: 'Emergency: sepsis is time-critical. Arrange hospital transfer now.',
-        evidence: [],
-        source: 'vitals'
       },
       {
         level: 'medium',
