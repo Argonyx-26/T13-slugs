@@ -18,11 +18,26 @@ import { GlowingEffect } from '@/components/ui/glowing-effect';
 import { Timeline } from '@/components/ui/timeline';
 import { cn } from '@/lib/utils';
 import { patientByIdOptions } from '../api/queries';
-import type { Fact, LabResult, Likelihood, PatientRecord, RiskItem } from '../api/types';
-import { formatDate, initials, sourceLabel } from '../utils/record';
+import type {
+  Fact,
+  LabResult,
+  Likelihood,
+  PatientRecord,
+  RiskItem,
+  TriageAssessment,
+  TriageFinding
+} from '../api/types';
+import { formatDate, initials, sourceLabel, vitalReadings } from '../utils/record';
 import { AllergyChip } from './allergy-chip';
 import { PatientTerminal } from './chat/patient-terminal';
 import { LikelihoodBadge, RISK_META, RiskBadge, RiskMeter, riskColorVar } from './risk-indicator';
+import {
+  TRIAGE_META,
+  TriageBadge,
+  TriageMeter,
+  isUrgent,
+  triageColorVar
+} from './triage-indicator';
 
 const SEX_LABEL = { M: 'Male', F: 'Female', O: 'Other' } as const;
 
@@ -242,6 +257,181 @@ function LabList({ labs }: { labs: LabResult[] }) {
   );
 }
 
+const FINDING_SOURCE: Record<TriageFinding['source'], string> = {
+  news2: 'NEWS2 score',
+  vitals: 'Vital signs',
+  red_flag: 'Red-flag symptoms',
+  trend: 'Trend across visits'
+};
+
+/** NEWS2 points for one sign: 3 is the danger range. The number is always shown, never colour alone. */
+function PointsTag({ points }: { points: number }) {
+  const color = points >= 3 ? 'var(--risk-high)' : 'var(--risk-moderate)';
+  return (
+    <span
+      className='rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums'
+      style={{ color, background: `color-mix(in oklch, ${color} 14%, transparent)` }}
+    >
+      +{points}
+    </span>
+  );
+}
+
+function VitalsGrid({ assessment }: { assessment: TriageAssessment }) {
+  const readings = assessment.vitals ? vitalReadings(assessment.vitals, assessment.news2) : [];
+  if (!readings.length) return null;
+  return (
+    <dl className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+      {readings.map((r) => (
+        <div
+          key={r.key}
+          className={cn(
+            'bg-card flex flex-col gap-0.5 rounded-xl border px-3 py-2',
+            (r.points ?? 0) >= 3 &&
+              'border-[color-mix(in_oklch,var(--risk-high)_45%,var(--border))]'
+          )}
+        >
+          <dt className='text-muted-foreground flex items-center justify-between gap-1 text-xs'>
+            {r.label}
+            {r.points ? <PointsTag points={r.points} /> : null}
+          </dt>
+          <dd className='text-sm font-semibold tabular-nums'>{r.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function TriageFindings({ findings }: { findings: TriageFinding[] }) {
+  return (
+    <ul className='flex flex-col gap-2.5'>
+      {findings.map((f, i) => (
+        <BlurFade key={`${f.title}-${i}`} inView delay={i * 0.06}>
+          <li
+            style={triageColorVar(f.level)}
+            className='bg-card relative overflow-hidden rounded-2xl border px-5 py-4 pl-6'
+          >
+            <span
+              aria-hidden
+              className='absolute inset-y-3 left-0 w-1 rounded-r-full'
+              style={{ background: 'var(--risk)' }}
+            />
+            {f.level === 'critical' && (
+              <BorderBeam
+                size={120}
+                duration={8}
+                borderWidth={1.5}
+                colorFrom='var(--risk-critical)'
+                colorTo='color-mix(in oklch, var(--risk-critical) 35%, transparent)'
+              />
+            )}
+            <div className='flex flex-wrap items-center gap-2'>
+              <span className='font-semibold tracking-tight'>{f.title}</span>
+              <TriageBadge level={f.level} />
+              <span className='text-muted-foreground text-xs'>{FINDING_SOURCE[f.source]}</span>
+            </div>
+            <ul className='text-foreground/80 mt-2 flex flex-col gap-1 text-sm leading-relaxed'>
+              {f.reasons.map((r) => (
+                <li key={r} className='flex gap-2'>
+                  <span aria-hidden className='text-muted-foreground'>
+                    ·
+                  </span>
+                  {r}
+                </li>
+              ))}
+            </ul>
+            <p className='mt-3 flex items-start gap-2 text-sm font-medium'>
+              <Icons.arrowRight
+                className='mt-0.5 size-4 shrink-0'
+                style={{ color: 'var(--risk)' }}
+                aria-hidden
+              />
+              {f.action}
+            </p>
+          </li>
+        </BlurFade>
+      ))}
+    </ul>
+  );
+}
+
+/** Urgency now: the desk's vital signs, NEWS2, and every rule that fired, with its reasons. */
+function TriageSection({ patient }: { patient: PatientRecord }) {
+  const a = patient.assessment;
+  if (!a) {
+    return (
+      <div className='text-muted-foreground flex items-center gap-2 rounded-2xl border border-dashed px-4 py-5 text-sm'>
+        <Icons.vitals className='size-4 shrink-0' aria-hidden />
+        No vital signs taken yet today. Triage runs as soon as the desk records them.
+      </div>
+    );
+  }
+  const meta = TRIAGE_META[a.level];
+  const checkedIn = a.assessed_at ? a.assessed_at.slice(11, 16) : null;
+  return (
+    <div className='flex flex-col gap-3'>
+      <div
+        style={triageColorVar(a.level)}
+        className='relative flex flex-col gap-3 overflow-hidden rounded-2xl border bg-[color-mix(in_oklch,var(--risk)_7%,var(--card))] p-4 sm:flex-row sm:items-center sm:gap-6'
+      >
+        {a.level === 'critical' && (
+          <BorderBeam
+            size={160}
+            duration={6}
+            borderWidth={2}
+            colorFrom='var(--risk-critical)'
+            colorTo='color-mix(in oklch, var(--risk-critical) 30%, transparent)'
+          />
+        )}
+        <div className='flex min-w-0 flex-1 flex-col gap-2'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <TriageBadge level={a.level} />
+            <span className='text-muted-foreground text-xs'>{meta.action}</span>
+          </div>
+          <p className='text-[15px] leading-6 font-medium'>{a.urgency}</p>
+          <TriageMeter level={a.level} size='md' className='max-w-72' />
+        </div>
+        {a.news2 && (
+          <div className='shrink-0 sm:text-right'>
+            <p className='text-muted-foreground text-xs font-medium tracking-wide uppercase'>
+              NEWS2
+            </p>
+            <p className='text-4xl font-semibold tracking-tight tabular-nums'>{a.news2.score}</p>
+            <p className='text-muted-foreground text-xs'>{a.news2.band} clinical risk</p>
+          </div>
+        )}
+      </div>
+      <VitalsGrid assessment={a} />
+      {a.findings.length > 0 ? (
+        <TriageFindings findings={a.findings} />
+      ) : (
+        <p className='text-muted-foreground flex items-center gap-2 text-sm'>
+          <Icons.riskLow
+            className='size-4 shrink-0'
+            style={{ color: 'var(--risk-low)' }}
+            aria-hidden
+          />
+          No warning signs in the vital signs, symptoms or record.
+        </p>
+      )}
+      {a.gaps.length > 0 && (
+        <ul className='text-muted-foreground flex flex-col gap-1 text-xs'>
+          {a.gaps.map((g) => (
+            <li key={g} className='flex items-start gap-1.5'>
+              <Icons.alertCircle className='mt-px size-3.5 shrink-0' aria-hidden />
+              {g}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className='text-muted-foreground text-xs'>
+        {checkedIn ? `Assessed at check-in, ${checkedIn}. ` : ''}
+        {a.disclaimer}
+      </p>
+    </div>
+  );
+}
+
 function PatientNarrative({ patient }: { patient: PatientRecord }) {
   const meta = [
     patient.age != null ? `${patient.age} years` : null,
@@ -252,7 +442,14 @@ function PatientNarrative({ patient }: { patient: PatientRecord }) {
 
   return (
     <div className='flex flex-col gap-10 pb-8'>
-      <header className='flex flex-col gap-4' style={riskColorVar(patient.risk.level)}>
+      <header
+        className='flex flex-col gap-4'
+        style={
+          patient.triage && isUrgent(patient.triage)
+            ? triageColorVar(patient.triage.level)
+            : riskColorVar(patient.risk.level)
+        }
+      >
         <BlurFade>
           <Link
             href='/patients'
@@ -276,6 +473,9 @@ function PatientNarrative({ patient }: { patient: PatientRecord }) {
           </div>
         </BlurFade>
         <BlurFade delay={0.12} className='flex flex-wrap gap-2'>
+          {patient.triage && (
+            <TriageBadge level={patient.triage.level} news2={patient.triage.news2} />
+          )}
           <RiskBadge level={patient.risk.level} />
           <AllergyChip allergy={patient.allergy} />
           {patient.isNew && (
@@ -297,6 +497,17 @@ function PatientNarrative({ patient }: { patient: PatientRecord }) {
           </BlurFade>
         )}
       </header>
+
+      <BlurFade inView delay={0.1}>
+        <section>
+          <SectionHeading
+            icon={Icons.vitals}
+            title='Triage now'
+            caption='Vital signs, symptoms and record, checked by fixed rules'
+          />
+          <TriageSection patient={patient} />
+        </section>
+      </BlurFade>
 
       <BlurFade inView delay={0.1}>
         <section>

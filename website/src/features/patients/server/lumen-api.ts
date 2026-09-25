@@ -19,16 +19,19 @@ import type {
   QAAnswer,
   RiskItem,
   Sex,
-  Source
+  Source,
+  TriageAssessment,
+  TriageLevel
 } from '../api/types';
 import {
   DISCLAIMER,
-  RISK_ORDER,
   allergyStatus,
+  compareQueue,
   formatDate,
   labelFromOutcome,
   riskSummary,
-  sortRisks
+  sortRisks,
+  triageSummary
 } from '../utils/record';
 
 const BASE_URL = process.env.LUMEN_API_URL?.replace(/\/+$/, '');
@@ -61,6 +64,12 @@ interface ApiQueueEntry extends ApiPatientSummary {
   visit_id: string;
   token: number;
   status: 'waiting' | 'seen';
+  // Triage at check-in, from the RAG module's triage_queue() (backend/sql/06_risk.sql).
+  // Optional: absent until the orchestrator passes them through; then the card shows no triage.
+  risk_level?: TriageLevel | null;
+  news2?: number | null;
+  top_finding?: string | null;
+  urgency?: string | null;
 }
 
 interface ApiProfile extends PatientProfile {
@@ -120,6 +129,25 @@ async function predictionsOrNull(id: string): Promise<ApiPredictionReport | null
   } catch {
     return null;
   }
+}
+
+/** GET /patients/{id}/risk: the latest RiskAssessment (rag/models.py). Missing endpoint or none yet -> null. */
+async function assessmentOrNull(id: string): Promise<TriageAssessment | null> {
+  try {
+    return await call<TriageAssessment | null>(`/patients/${id}/risk`, {}, 8_000);
+  } catch {
+    return null;
+  }
+}
+
+function queueTriage(visit: ApiQueueEntry | undefined): PatientCard['triage'] {
+  if (!visit?.risk_level) return null;
+  return {
+    level: visit.risk_level,
+    label: visit.top_finding ?? 'Vital signs normal',
+    news2: visit.news2 ?? null,
+    urgency: visit.urgency ?? ''
+  };
 }
 
 async function todaysQueue(): Promise<Map<string, ApiQueueEntry>> {
@@ -186,6 +214,7 @@ function toCard(
     risk: report
       ? riskSummary(toRisks(report), hasRecords)
       : { level: 'unknown', label: 'Not assessed yet', count: 0 },
+    triage: queueTriage(visit),
     lastRecordOn: newestDate(profile, notes),
     isNew: !hasRecords
   };
@@ -282,25 +311,26 @@ export const lumenApi = {
         return toCard(s, profile, notes, report, queue.get(s.patient_uuid));
       })
     );
-    return cards.toSorted(
-      (a, b) =>
-        RISK_ORDER[a.risk.level] - RISK_ORDER[b.risk.level] || (a.token ?? 99) - (b.token ?? 99)
-    );
+    return cards.toSorted(compareQueue);
   },
 
   async getPatient(id: string): Promise<PatientRecord | null> {
     const summaries = await call<ApiPatientSummary[]>('/patients');
     const summary = summaries.find((s) => s.patient_uuid === id);
     if (!summary) return null;
-    const [profile, notes, report, queue] = await Promise.all([
+    const [profile, notes, report, queue, assessment] = await Promise.all([
       call<ApiProfile>(`/patients/${id}`),
       call<ApiSavedNote[]>(`/patients/${id}/notes`),
       predictionsOrNull(id),
-      todaysQueue()
+      todaysQueue(),
+      assessmentOrNull(id)
     ]);
     const card = toCard(summary, profile, notes, report, queue.get(id));
     return {
       ...card,
+      // The full assessment, when the orchestrator serves one, is newer than the queue's summary
+      triage: assessment ? triageSummary(assessment) : card.triage,
+      assessment,
       overview: composeOverview(card, profile, notes),
       profile: {
         allergies: profile.allergies,

@@ -2,6 +2,7 @@ import {
   IconAdjustmentsHorizontal,
   IconActivity,
   IconAlertCircleFilled,
+  IconAlertOctagonFilled,
   IconAlertTriangleFilled,
   IconArrowLeft,
   IconArrowUp,
@@ -20,6 +21,8 @@ import {
   IconReportMedical,
   IconShieldCheck,
   IconStethoscope,
+  IconThermometer,
+  IconUrgent,
   IconUserPlus,
   IconAlertCircle,
   IconAlertTriangle,
@@ -261,6 +264,11 @@ export const Icons = {
   riskModerate: IconAlertCircleFilled,
   riskLow: IconCircleCheckFilled,
   riskUnknown: IconCircleDashed,
+
+  // Triage: urgency now, from vital signs (critical has its own shape, not just a colour)
+  triageCritical: IconAlertOctagonFilled,
+  urgent: IconUrgent,
+  vitals: IconThermometer,
 
   // Chat
   arrowUp: IconArrowUp,

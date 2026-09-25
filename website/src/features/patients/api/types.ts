@@ -71,6 +71,60 @@ export interface QAAnswer {
   citations: Evidence[];
 }
 
+// ---------- Triage: early health-risk detection (backend/rag/risk.py) ----------
+// Mirrors rag/models.py (Vitals, NEWS2, RiskFinding, RiskAssessment). Triage is how urgent
+// the patient is *now*, from vital signs, symptoms and the record; it is separate from
+// Prediction, which is what may happen later.
+
+export type TriageLevel = 'low' | 'medium' | 'high' | 'critical';
+
+export interface Vitals {
+  systolic_bp: number | null;
+  diastolic_bp: number | null;
+  heart_rate: number | null;
+  resp_rate: number | null;
+  temperature_c: number | null;
+  spo2: number | null;
+  on_oxygen: boolean;
+  consciousness: 'alert' | 'new_confusion' | 'voice' | 'pain' | 'unresponsive' | null;
+  blood_glucose: number | null;
+  weight_kg: number | null;
+}
+
+/** National Early Warning Score 2. `missing`: parameters not measured, so the score may be too low. */
+export interface News2 {
+  score: number;
+  band: 'low' | 'low-medium' | 'medium' | 'high';
+  points: Record<string, number>;
+  missing: string[];
+}
+
+export interface TriageFinding {
+  level: TriageLevel;
+  title: string;
+  reasons: string[];
+  /** How urgently, and what to check. The doctor decides. */
+  action: string;
+  evidence: number[];
+  source: 'news2' | 'vitals' | 'red_flag' | 'trend';
+}
+
+export interface TriageAssessment {
+  level: TriageLevel;
+  urgency: string;
+  news2: News2 | null;
+  /** Highest level first */
+  findings: TriageFinding[];
+  /** What wasn't measured or recorded, so "low" is never over-trusted */
+  gaps: string[];
+  vitals: Vitals | null;
+  disclaimer: string;
+  patient_id: string | null;
+  visit_id: string | null;
+  stage: 'triage' | 'consult' | null;
+  assessed_at: string | null;
+}
+
 // ---------- Dashboard view models ----------
 
 /** `unknown` = nothing on record to assess yet (e.g. registered at the desk today). */
@@ -97,11 +151,21 @@ export interface PatientCard {
   conditions: string[];
   allergy: { state: AllergyState; label: string };
   risk: { level: RiskLevel; label: string; count: number };
+  /** Triage at check-in; null until the desk takes vital signs */
+  triage: {
+    level: TriageLevel;
+    /** The top finding, or "Vital signs normal" */
+    label: string;
+    news2: number | null;
+    urgency: string;
+  } | null;
   lastRecordOn: string | null;
   isNew: boolean;
 }
 
 export interface PatientRecord extends PatientCard {
+  /** The full triage behind `triage`: vital signs, NEWS2, findings and gaps */
+  assessment: TriageAssessment | null;
   /** Paragraphs */
   overview: string[];
   profile: PatientProfile;

@@ -8,7 +8,7 @@
 // ============================================================
 
 import type { Evidence, PatientRecord, QAAnswer, RiskItem } from '../api/types';
-import { NO_ALLERGY, formatDate, sourceLabel } from './record';
+import { UNKNOWN_ALLERGY, formatDate, saysNoAllergy, sourceLabel, vitalReadings } from './record';
 
 /** The exact refusal sentence and rule the orchestrator uses (backend/app/orchestrator/pipeline.py). */
 export const REFUSAL =
@@ -27,6 +27,8 @@ const TOPICS = {
   medication: /medic|medicine|drug|tablet|taking|dose|dosage|prescri|pill|inhaler/i,
   lab: /\blabs?\b|test|result|level|hba1c|a1c|\binr\b|egfr|kidney|renal|glucose|sugar|cholesterol|ldl|tsh|thyroid|haemoglobin|hemoglobin|\bhb\b|urine|trend/i,
   condition: /condition|chronic|long[- ]term|problem|illness|comorbid/i,
+  triage:
+    /triage|urgen|emergenc|vital|news2|sepsis|blood pressure|\bbp\b|pulse|heart rate|temperature|fever|oxygen|spo2|saturation|breathing|confus|critical|queue/i,
   risk: /risk|concern|worr|watch|flag|alert|danger|safe|interact|contraindicat|careful|avoid|caution|bleed/i,
   summary:
     /summar|overview|brief|tell me about|background|recap|who is|history|timeline|last visit|recent|previous/i,
@@ -81,9 +83,9 @@ function allergySection(p: PatientRecord): Section {
   const lines = allergies.map(
     (a) => `- **${a.value}**${a.note ? `: ${a.note}` : ''} (${when(a.source, a.recorded_on)})`
   );
+  const known = allergies.filter((a) => !UNKNOWN_ALLERGY.test(a.value));
   const disagree =
-    allergies.some((a) => NO_ALLERGY.test(a.value)) &&
-    allergies.some((a) => !NO_ALLERGY.test(a.value));
+    known.some((a) => saysNoAllergy(a.value)) && known.some((a) => !saysNoAllergy(a.value));
   return {
     text:
       `**Allergies on record**\n${lines.join('\n')}` +
@@ -169,6 +171,41 @@ function riskSection(p: PatientRecord, q: Set<string>): Section {
   };
 }
 
+/** Today's triage: urgency now, from the vital signs taken at check-in (backend/rag/risk.py). */
+function triageSection(p: PatientRecord): Section {
+  const a = p.assessment;
+  if (!a) {
+    return {
+      text: `**Triage:** no vital signs have been taken for ${p.displayName} today, so urgency has not been assessed.`,
+      citations: []
+    };
+  }
+  const vitals = a.vitals ? vitalReadings(a.vitals, a.news2) : [];
+  const lines = [
+    `**Triage: ${a.level.toUpperCase()}.** ${a.urgency}`,
+    a.news2
+      ? `NEWS2 early-warning score: **${a.news2.score}** (${a.news2.band} clinical risk).`
+      : '',
+    vitals.length
+      ? `**Vital signs at check-in**\n${vitals
+          .map((r) => `- ${r.label}: ${r.value}${r.points ? ` (+${r.points})` : ''}`)
+          .join('\n')}`
+      : '',
+    a.findings.length
+      ? `**Why**\n${a.findings
+          .map((f) => `- **${f.title}** (${f.level}): ${f.reasons.join('; ')}. ${f.action}`)
+          .join('\n')}`
+      : 'No warning signs were found.',
+    a.gaps.length ? `**Not measured:** ${a.gaps.join(' ')}` : ''
+  ];
+  return {
+    text: lines.filter(Boolean).join('\n\n'),
+    citations: a.findings.map((f) =>
+      cite('rule_table', `${f.title}: ${f.reasons.join('; ')}`, a.assessed_at?.slice(0, 10))
+    )
+  };
+}
+
 function summarySection(p: PatientRecord): Section {
   const recent = p.history.slice(0, 3);
   return {
@@ -220,6 +257,7 @@ export function answerFromRecord(patient: PatientRecord, question: string): QAAn
   const sections: Section[] = [];
 
   for (const topic of wanted) {
+    if (topic === 'triage') sections.push(triageSection(patient));
     if (topic === 'allergy') sections.push(allergySection(patient));
     if (topic === 'medication') sections.push(medicationSection(patient));
     if (topic === 'lab') sections.push(labSection(patient, q));
@@ -238,7 +276,7 @@ export function answerFromRecord(patient: PatientRecord, question: string): QAAn
     return {
       answer:
         `I couldn't find anything in ${patient.displayName}'s record that matches this question. ` +
-        'I can only answer from the stored record: allergies, medicines, conditions, lab results, past visits and the risks flagged from them.',
+        'I can only answer from the stored record: allergies, medicines, conditions, lab results, past visits, today’s vital signs and triage, and the risks flagged from them.',
       refused: false,
       citations: []
     };

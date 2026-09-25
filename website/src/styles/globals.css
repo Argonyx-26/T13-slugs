@@ -646,6 +646,8 @@
    so meaning never rests on colour alone.
    ============================================================ */
 :root {
+  /* Triage 'critical' (emergency now): a deeper crimson than high, with its own octagon icon */
+  --risk-critical: #be123c;
   --risk-high: #d03b3b;
   --risk-moderate: #fab219;
   --risk-low: #0ca30c;
@@ -653,6 +655,7 @@
 }
 
 @theme inline {
+  --color-risk-critical: var(--risk-critical);
   --color-risk-high: var(--risk-high);
   --color-risk-moderate: var(--risk-moderate);
   --color-risk-low: var(--risk-low);

@@ -39,6 +39,11 @@ export function PatientStats({ patients }: { patients: PatientCard[] }) {
   const allergyChecks = patients.filter(
     (p) => p.allergy.state === 'conflict' || p.allergy.state === 'unknown'
   ).length;
+  // Urgency now counts only patients still waiting: a seen patient no longer needs to jump the queue
+  const triaged = (level: NonNullable<PatientCard['triage']>['level']) =>
+    patients.filter((p) => p.visitStatus !== 'seen' && p.triage?.level === level).length;
+  const critical = triaged('critical');
+  const urgentHigh = triaged('high');
 
   const stats: Stat[] = [
     {
@@ -49,18 +54,18 @@ export function PatientStats({ patients }: { patients: PatientCard[] }) {
       color: 'var(--muted-foreground)'
     },
     {
-      label: 'High risk',
-      value: count('high'),
-      detail: 'Flagged from the record',
-      icon: Icons.riskHigh,
-      color: 'var(--risk-high)'
+      label: 'Urgent now',
+      value: critical + urgentHigh,
+      detail: `${critical} critical · ${urgentHigh} high · ${triaged('medium')} see soon`,
+      icon: Icons.triageCritical,
+      color: 'var(--risk-critical)'
     },
     {
-      label: 'Moderate risk',
-      value: count('moderate'),
-      detail: 'Flagged from the record',
-      icon: Icons.riskModerate,
-      color: 'var(--risk-moderate)'
+      label: 'High risk',
+      value: count('high'),
+      detail: `${count('moderate')} moderate · predicted from the record`,
+      icon: Icons.riskHigh,
+      color: 'var(--risk-high)'
     },
     {
       label: 'Allergy status to check',

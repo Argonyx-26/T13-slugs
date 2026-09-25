@@ -8,14 +8,69 @@ import type { PatientCard } from '../api/types';
 import { formatDate, initials } from '../utils/record';
 import { AllergyChip } from './allergy-chip';
 import { RISK_META, RiskBadge, RiskMeter, riskColorVar } from './risk-indicator';
+import { TRIAGE_META, TriageBadge, isUrgent, triageColorVar } from './triage-indicator';
 
 export type BentoSize = 'lg' | 'md' | 'sm';
 
-/** High risk gets a 2×2 tile, moderate a wide tile, everything else one cell. */
+/**
+ * Urgent now (triage critical/high) or high predicted risk gets a 2×2 tile; triage medium or
+ * moderate risk a wide tile; everything else one cell.
+ */
 export function bentoSize(patient: PatientCard): BentoSize {
-  if (patient.risk.level === 'high') return 'lg';
-  if (patient.risk.level === 'moderate') return 'md';
+  if (isUrgent(patient.triage) || patient.risk.level === 'high') return 'lg';
+  if (patient.triage?.level === 'medium' || patient.risk.level === 'moderate') return 'md';
   return 'sm';
+}
+
+/** The card's accent: triage when it is urgent (that decides who is seen first), else predicted risk. */
+function accentStyle(patient: PatientCard): React.CSSProperties {
+  return patient.triage && isUrgent(patient.triage)
+    ? triageColorVar(patient.triage.level)
+    : riskColorVar(patient.risk.level);
+}
+
+function TriageStrip({
+  triage,
+  size
+}: {
+  triage: NonNullable<PatientCard['triage']>;
+  size: BentoSize;
+}) {
+  const meta = TRIAGE_META[triage.level];
+  const urgent = isUrgent(triage);
+  return (
+    <div
+      style={triageColorVar(triage.level)}
+      className={cn(
+        'flex flex-col gap-1.5 rounded-xl border px-3 py-2',
+        urgent
+          ? 'border-[color-mix(in_oklch,var(--risk)_40%,var(--border))] bg-[color-mix(in_oklch,var(--risk)_9%,var(--card))]'
+          : 'bg-muted/40'
+      )}
+    >
+      <div className='flex flex-wrap items-center gap-2'>
+        <TriageBadge level={triage.level} news2={size === 'sm' ? null : triage.news2} />
+        <span
+          className={cn(
+            'min-w-0 truncate text-sm',
+            urgent ? 'font-semibold' : 'text-muted-foreground'
+          )}
+        >
+          {triage.label}
+        </span>
+      </div>
+      {urgent && size === 'lg' && (
+        <p className='text-foreground/80 flex items-start gap-1.5 text-xs leading-relaxed'>
+          <Icons.urgent
+            className='mt-px size-3.5 shrink-0'
+            style={{ color: meta.color }}
+            aria-hidden
+          />
+          {triage.urgency}
+        </p>
+      )}
+    </div>
+  );
 }
 
 const SPAN: Record<BentoSize, string> = {
@@ -53,8 +108,8 @@ export function PatientBentoCard({ patient, size, index }: PatientBentoCardProps
     <Link
       href={`/patients/${patient.id}`}
       onPointerMove={handlePointerMove}
-      aria-label={`${patient.displayName}, ${patient.risk.level === 'unknown' ? 'risk not assessed' : `${patient.risk.level} risk`}. Open record`}
-      style={{ ...riskColorVar(patient.risk.level), '--i': index } as React.CSSProperties}
+      aria-label={`${patient.displayName}, ${patient.triage ? `triage ${patient.triage.level}: ${patient.triage.label}, ` : ''}${patient.risk.level === 'unknown' ? 'risk not assessed' : `${patient.risk.level} risk`}. Open record`}
+      style={{ ...accentStyle(patient), '--i': index } as React.CSSProperties}
       className={cn(
         'group/card animate-bento-in bg-card text-card-foreground relative isolate flex min-h-44 flex-col gap-4 overflow-hidden rounded-2xl border p-5 shadow-xs outline-none',
         'transition-[translate,box-shadow,border-color] duration-300 hover:-translate-y-0.5 hover:shadow-lg',
@@ -126,6 +181,7 @@ export function PatientBentoCard({ patient, size, index }: PatientBentoCardProps
       </header>
 
       <div className='flex min-h-0 flex-1 flex-col gap-2'>
+        {patient.triage && <TriageStrip triage={patient.triage} size={size} />}
         {patient.reasonForVisit && (
           <p className='text-sm font-medium'>
             <span className='text-muted-foreground font-normal'>Today · </span>

@@ -33,11 +33,15 @@ export function PatientBentoGrid() {
     const matches = data.patients.filter(
       (p) =>
         !q ||
-        [p.displayName, p.reasonForVisit ?? '', p.summary, ...p.conditions].some((t) =>
-          t.toLowerCase().includes(q)
-        )
+        [
+          p.displayName,
+          p.reasonForVisit ?? '',
+          p.summary,
+          p.triage?.label ?? '',
+          ...p.conditions
+        ].some((t) => t.toLowerCase().includes(q))
     );
-    // The service returns risk order; queue order is by token
+    // The service returns urgency order (triage, then risk); queue order is by token
     return sort === 'queue'
       ? matches.toSorted((a, b) => (a.token ?? 999) - (b.token ?? 999))
       : matches;
@@ -69,8 +73,8 @@ export function PatientBentoGrid() {
           }}
           aria-label='Sort patients'
         >
-          <ToggleGroupItem value='risk' aria-label='Sort by risk'>
-            <Icons.riskHigh className='size-3.5' /> Risk first
+          <ToggleGroupItem value='risk' aria-label='Sort by urgency: triage, then risk'>
+            <Icons.urgent className='size-3.5' /> Urgent first
           </ToggleGroupItem>
           <ToggleGroupItem value='queue' aria-label='Sort by queue token'>
             <Icons.sort className='size-3.5' /> Queue order
@@ -86,7 +90,7 @@ export function PatientBentoGrid() {
             </EmptyMedia>
             <EmptyTitle>No patients match “{query}”</EmptyTitle>
             <EmptyDescription>
-              Search looks at names, conditions and today’s complaints.
+              Search looks at names, conditions, today’s complaints and triage findings.
             </EmptyDescription>
           </EmptyHeader>
           <Button variant='outline' size='sm' onClick={() => void setQuery(null)}>
