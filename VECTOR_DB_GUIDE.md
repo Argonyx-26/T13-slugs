@@ -50,7 +50,8 @@ Flutter ─► FastAPI ─► WhisperX ─► Presidio ─► Brain pass 1: Engl
 3. **SQL Editor:** paste and run each file in order, pasting **only** the file's SQL:
    - `backend/sql/01_schema.sql`: tables, indexes, permissions.
    - `backend/sql/02_functions.sql`: search and permission functions.
-   - `backend/sql/03_verify.sql`: expect 5 tables with `rls_on=true`, 4 functions, and all four "backend can …" rows `false`.
+   - `backend/sql/04_reception.sql`: the reception desk (patient identity, the day's queue). Already set up? Just run this one.
+   - `backend/sql/03_verify.sql`: expect 7 tables with `rls_on=true`, 8 functions, and all four "backend can …" rows `false`.
    - `backend/sql/00_reset.sql` is **only** for wiping an existing project and starting over. It deletes everything.
 
 ### 2b. Python
@@ -67,6 +68,25 @@ Run everything from `backend/` with `python -m rag.<module>`; running the files 
 
 ---
 
+## 2c. Clinics with no records system
+
+Most small clinics keep a paper register, not a database. For them, **the reception desk is where a patient enters
+the database**; there is nothing to import. The receptionist:
+
+1. **Searches** by phone number or name. Found: check them in (`reception.check_in`). Not found:
+2. **Registers** them (`reception.register_patient`): name, phone, age, sex, plus what the patient reports:
+   allergies (or the **No known allergies** box), long-term conditions and current medicines. They get the next
+   P-number and a token in today's queue.
+
+The reported items become clinic records ("… reported by patient at registration"), so allergy and interaction checks
+work from the first consult. **Blank allergies are saved as nothing**, and the LLM is told the allergy status was
+never recorded; they never read as "no allergies". From then on, every approved consult note adds to the patient's
+memory, so the history builds up visit by visit.
+
+`visit_day` is the clinic's local date, passed in by FastAPI (the database runs on UTC).
+
+---
+
 ## 3. Tables
 
 | Table | Tier | What's in it |
@@ -76,6 +96,8 @@ Run everything from `backend/` with `python -m rag.<module>`; running the files 
 | `doctor_notes` | doctor | The Brain's JSON note, `status` draft or approved |
 | `doctor_hidden_patients` | doctor | The doctor's "delete" = hide from their list |
 | `memory_chunks` | both | The search index: one row per record or note section, with its embedding (384 numbers) and keyword index |
+| `patient_identity` | desk | Name and phone, for the reception search. Never embedded, never sent to the LLM |
+| `visits` | desk | The day's queue: token, `waiting` / `seen` |
 
 **Who can delete what**
 
@@ -127,6 +149,10 @@ store.approve_note(note["id"])                         # when the doctor clicks 
 | `POST /patients/{id}/clear-memory` | `store.clear_doctor_memory()` |
 | `POST /patients/{id}/hide`, `/unhide` | `store.hide_patient()`, `store.unhide_patient()` |
 | `DELETE /clinic/patients/{id}` | `store.receptionist_delete_patient(token, id)`, receptionist screen only |
+| `POST /clinic/patients` | `reception.register_patient(...)`, reception screen: new patient + check-in |
+| `GET /clinic/patients/search?q=...` | `reception.search_patients()`: phone digits, part of a name, or a P-number |
+| `POST /clinic/patients/{id}/check-in` | `reception.check_in(id, clinic_today)` |
+| `GET /visits/today` | `reception.visit_queue(clinic_today)`; the doctor's phone picks the patient here |
 | `GET /search/similar?q=...` | `store.find_similar_patients()` |
 | `POST /admin/sync` | `sync.reindex()`, the "nightly sync" button |
 
@@ -142,7 +168,7 @@ Showing the right buttons for each role is only for convenience. The real protec
 
 | File | What it does |
 |---|---|
-| `sql/01_schema.sql`, `02_functions.sql`, `03_verify.sql`, `00_reset.sql` | Database setup, checks and reset |
+| `sql/01_schema.sql`, `02_functions.sql`, `04_reception.sql`, `03_verify.sql`, `00_reset.sql` | Database setup, checks and reset |
 | `rag/db.py` | Supabase clients (backend key; acting as a logged-in user) |
 | `rag/embedder.py` | Local embedding model (`EMBED_MODEL`, default MedEmbed-small) |
 | `rag/chunks.py` | Records and notes → search-index rows |
@@ -150,6 +176,7 @@ Showing the right buttons for each role is only for convenience. The real protec
 | `rag/context.py` | `get_context()`, conflict check, `format_for_llm()` |
 | `rag/drugs.py`, `rag/data/*.json` | Brand → generic → class lookup, interaction rules, `safety_hits()`. Demo coverage, **not a clinical reference** |
 | `rag/sync.py` | Rebuilds the search index |
+| `rag/reception.py` | Registration, patient search, check-in and the day's queue |
 | `rag/setup_users.py` | Creates the demo logins with roles |
 | `rag/demo_data.py`, `rag/seed.py` | The 5 demo patients and the loader |
 | `rag/check_scenarios.py` | End-to-end checks |

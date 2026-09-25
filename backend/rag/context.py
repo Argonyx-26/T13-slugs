@@ -127,6 +127,8 @@ def format_for_llm(ctx: PatientContext) -> str:
     lines += [f"  [H{f.chunk_id}] {f.recorded_at} · {src[f.tier]} · {f.kind}: {f.text}" for f in ctx.safety_facts]
     if not ctx.safety_facts:
         lines.append("  (none recorded)")
+    if not any(f.kind == "allergy" for f in ctx.safety_facts):
+        lines.append("  Allergy status: NEVER RECORDED (unknown, not 'none'); ask before prescribing.")
     if ctx.conflicts:
         lines += ["", "CONFLICTS BETWEEN RECORDS (do not resolve; tell the doctor):"]
         lines += [f"  - {c.message} [{', '.join(f'H{i}' for i in c.chunk_ids)}]" for c in ctx.conflicts]

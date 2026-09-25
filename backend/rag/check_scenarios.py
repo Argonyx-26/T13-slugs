@@ -9,8 +9,9 @@ they are skipped, not failed.
 import os
 import sys
 import uuid
+from datetime import date
 
-from . import store
+from . import reception, store
 from .context import format_for_llm, get_context
 from .db import service as sb
 from .demo_data import PATIENTS
@@ -114,6 +115,43 @@ def receptionist_delete():
     check("receptionist's login deletes the patient", gone)
 
 
+def reception_desk():
+    """A paper-register clinic's first patients. Uses a queue day in 2000 so today's real queue is untouched."""
+    print("\nReception desk: registration is where a patient enters the database")
+    password = os.getenv("DEMO_USER_PASSWORD")
+    if not password:
+        print("  SKIP  set DEMO_USER_PASSWORD: the test patients can only be removed with the receptionist's login")
+        return
+    day, tag = date(2000, 1, 1), uuid.uuid4().hex[:6]
+    name, phone = f"Testname {tag}", f"90000{uuid.uuid4().int % 100000:05d}"
+    first = reception.register_patient(name, f"+91 {phone}", 41, "F", allergies=["sulfa drugs"],
+                                       conditions=["Type 2 diabetes"], medications=["Metformin 500 mg twice daily"],
+                                       visit_day=day)
+    second = reception.register_patient(f"Testname {tag} two", None, 30, "M", visit_day=day)
+    pid, pid2 = first["patient"]["id"], second["patient"]["id"]
+    try:
+        check("new patient gets a P-number and a token", first["patient"]["display_code"].startswith("P-")
+              and second["visit"]["token"] == first["visit"]["token"] + 1,
+              f"{first['patient']['display_code']} token {first['visit']['token']}")
+        check("search by phone finds them", pid in {p["patient_id"] for p in reception.search_patients(phone[-6:])})
+        check("checking in again keeps the same token",
+              reception.check_in(pid, day)["token"] == first["visit"]["token"])
+        ctx = get_context(pid, ["frequent urination"], ["Septran"])
+        check("desk-reported allergy is a safety fact from day one",
+              any("sulfa" in f.text for f in ctx.safety_facts if f.kind == "allergy"))
+        chunks = sb.table("memory_chunks").select("content").eq("patient_id", pid).execute().data
+        check("name never reaches the search index", len(chunks) == 3 and not any(tag in c["content"] for c in chunks),
+              f"{len(chunks)} chunks")
+        block = format_for_llm(get_context(pid2, ["cough"], []))
+        check("blank allergies read as unknown, not 'none'", "NEVER RECORDED" in block and tag not in block)
+        check("marking seen", reception.mark_visit_seen(second["visit"]["id"])
+              and [v["status"] for v in reception.visit_queue(day) if v["patient_id"] == pid2] == ["seen"])
+    finally:
+        token = store.login(next(e for e, r in USERS.items() if r == "receptionist"), password)["token"]
+        for p in (pid, pid2):
+            store.receptionist_delete_patient(token, p)
+
+
 if __name__ == "__main__":
     show = set(sys.argv[sys.argv.index("--show") + 1:]) if "--show" in sys.argv else set()
     ids = {p["display_code"]: p["id"] for p in sb.table("patients").select("id, display_code").execute().data}
@@ -121,5 +159,6 @@ if __name__ == "__main__":
     doctor_tier(ids["P-005"])
     clinic_tier(ids["P-005"])
     receptionist_delete()
+    reception_desk()
     print(f"\n{sum(results)}/{len(results)} checks passed")
     sys.exit(0 if all(results) else 1)
