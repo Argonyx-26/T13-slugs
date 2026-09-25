@@ -11,7 +11,7 @@
 | analyze **vital signs** | Taken at check-in: BP, pulse, breathing rate, temperature (°C or °F), SpO₂, oxygen, consciousness, blood sugar, weight. Scored with **NEWS2** | `vital_signs` table, `risk.news2()` |
 | analyze **symptoms** | The desk's complaint at check-in, then the symptoms the Brain extracts from the consult recording (any language → English) | `reception.record_vitals()`, Brain pass 1 |
 | analyze **relevant health information** | The patient's allergies, conditions and medicines (always), past records related to today's symptoms (search), and earlier vital signs (trends) | `get_context()`, `risk._trends()` |
-| **identify high-risk conditions** | Fixed, explainable rules: NEWS2, sepsis, heart attack, stroke, DKA, low sugar, hypertensive emergency, GI bleed on a blood thinner, anaphylaxis, self-harm, pregnancy warnings, and early risks (diabetes, hypertension, weight loss, TB) | `rag/risk.py`, `rag/data/red_flags.json` |
+| **identify high-risk conditions** | Fixed, explainable rules: NEWS2, sepsis, heart attack, stroke, DKA, low sugar, hypertensive emergency, pre-eclampsia, GI bleed on a blood thinner, anaphylaxis, self-harm, pregnancy warnings, and early risks (diabetes, hypertension, weight loss, TB) | `rag/risk.py`, `rag/data/red_flags.json` |
 | **real-time** decision support | Assessed the moment vitals are saved (the rules themselves take milliseconds; the history lookup takes a second or two), and again as soon as the consult's symptoms are extracted | `record_vitals()`, `assess_patient()` |
 | **timely medical attention** | The day's queue is ordered by risk. A critical patient goes to the top, ahead of patients who arrived earlier | `triage_queue()` |
 | decision support for **intervention** | Every finding gives an urgency level, the reasons, what to check or do next, and the records it's based on. The doctor decides | `RiskFinding.action`, `.evidence` |
@@ -35,7 +35,7 @@ then token order                                  Brain pass 2, which explains i
 
 | Level | What happens | Examples |
 |---|---|---|
-| **Critical** | Emergency: the doctor sees the patient now; be ready to transfer | NEWS2 ≥ 7, possible sepsis, chest pain with sweating, stroke signs, blood sugar < 54, black stools on warfarin |
+| **Critical** | Emergency: the doctor sees the patient now; be ready to transfer | NEWS2 ≥ 7, possible sepsis, chest pain with sweating, stroke signs, blood sugar < 54, black stools on warfarin, BP ≥ 140/90 in pregnancy with headache |
 | **High** | Urgent: front of the queue | NEWS2 5–6, chest pain alone, BP ≥ 180/120, blood sugar < 70 or ≥ 300, infection plus one sepsis sign |
 | **Medium** | Priority: see soon, recheck vitals every 30 min | One vital sign in the danger range (+3), early risks: rising BP, diabetes signs, weight loss |
 | **Low** | Routine queue order | Normal vitals, no red flags |
@@ -44,8 +44,9 @@ then token order                                  Brain pass 2, which explains i
 
 1. **NEWS2** (Royal College of Physicians, 2017) is the UK standard early-warning score used in hospitals. It
    uses seven vital signs. Missing signs are listed as gaps, never assumed normal.
-2. **Thresholds NEWS2 doesn't cover**, such as very high BP, low or high blood sugar, and possible DKA
-   (high sugar + vomiting/abdominal pain/drowsiness in a diabetic).
+2. **Thresholds NEWS2 doesn't cover**, such as very high BP, low or high blood sugar, possible DKA
+   (high sugar + vomiting/abdominal pain/drowsiness in a diabetic), and possible pre-eclampsia (BP ≥ 140/90 in a
+   pregnancy stated today or on record. It's critical with headache, visual symptoms or swelling, or at ≥ 160/110).
 3. **Red-flag symptoms** (`red_flags.json`, readable by a clinician without reading code). The patient's history can
    raise the level: *black stools* is high, but *black stools on warfarin* is critical, and the finding cites the
    warfarin prescription. "No chest pain" doesn't fire the chest-pain rule.

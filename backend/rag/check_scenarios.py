@@ -262,6 +262,17 @@ def risk_rules():
     check("blood pressure rising over three visits -> hypertension risk",
           any("hypertension" in f.title for f in a.findings))
     check("blood sugar 45 mg/dL -> critical", risk.assess([], Vitals(blood_glucose=45)).level == "critical")
+
+    pregnancy = Fact(chunk_id=11, kind="diagnosis", tier="clinic", text="Pregnancy, 26 weeks.", recorded_at="2026-06-12")
+    pregnant = PatientContext(patient_id="x", display_code="P-X", age=29, sex="F", safety_facts=[pregnancy],
+                              conflicts=[], relevant=[])
+    a = risk.assess(["headache for four days", "swollen feet"], Vitals(**{**normal, "systolic_bp": 148, "diastolic_bp": 96}),
+                    pregnant)
+    check("BP 148/96 + headache, pregnancy on record -> possible pre-eclampsia, critical, citing the record",
+          a.level == "critical" and any(f.title == "Possible pre-eclampsia" and f.evidence == [11] for f in a.findings))
+    check("...the same blood pressure without a pregnancy is not pre-eclampsia",
+          not any("pre-eclampsia" in f.title for f in
+                  risk.assess(["headache"], Vitals(**{**normal, "systolic_bp": 148, "diastolic_bp": 96})).findings))
     check("cold with normal vitals -> low", risk.assess(["runny nose", "sore throat"], Vitals(**normal)).level == "low")
     check("no vitals at all is flagged as a gap", any("No vital signs" in g for g in risk.assess(["cough"], None).gaps))
 

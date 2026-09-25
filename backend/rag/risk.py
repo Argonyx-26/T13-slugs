@@ -114,10 +114,33 @@ _DKA = ["vomit", "abdominal pain", "stomach pain", "belly pain", "deep breathing
 _DIABETES = ["diabet", "insulin", "metformin", "glimepiride", "gliclazide", "sitagliptin", "vildagliptin"]
 _HYPERTENSION = ["hypertension", "high blood pressure", "amlodipine", "telmisartan", "losartan", "ramipril",
                  "enalapril", "hydrochlorothiazide", "chlorthalidone"]
+_PREGNANT = ["pregnan", "antenatal"]
+_PRE_ECLAMPSIA = ["headache", "blurred vision", "visual", "flashing lights", "swelling", "swollen",
+                  "upper abdominal pain", "abdominal pain", "breathless", "vomit"]
+
+
+def _pre_eclampsia(v: Vitals, symptoms: list[str], history: list["_Item"]) -> list[RiskFinding]:
+    """Raised blood pressure (140/90+) in a pregnant patient. Pregnancy comes from today's symptoms or the record."""
+    if (v.systolic_bp or 0) < 140 and (v.diastolic_bp or 0) < 90:
+        return []
+    said, on_record = _matched(_PREGNANT, symptoms), _history_hits(_PREGNANT, history)
+    if not (said or on_record):
+        return []
+    severe_bp = (v.systolic_bp or 0) >= 160 or (v.diastolic_bp or 0) >= 110
+    features = [s for s in _matched(_PRE_ECLAMPSIA, symptoms) if s not in said]
+    urgent = severe_bp or bool(features)
+    return [RiskFinding(
+        level="critical" if urgent else "high", source="vitals", title="Possible pre-eclampsia",
+        reasons=[f"blood pressure {v.systolic_bp or '?'}/{v.diastolic_bp or '?'} mmHg in pregnancy"]
+                + ([f"with {', '.join(features)}"] if features else [])
+                + ([f"Pregnancy on record ({_cite(on_record[0])})"] if on_record else []),
+        action=("Emergency: same-day obstetric assessment. Check urine protein now." if urgent
+                else "Urgent: check urine protein and repeat the blood pressure; obstetric review today."),
+        evidence=[h.chunk_id for h in on_record[:2]])]
 
 
 def _vital_findings(v: Vitals, symptoms: list[str], history: list["_Item"]) -> list[RiskFinding]:
-    out = []
+    out = _pre_eclampsia(v, symptoms, history)
     if (v.systolic_bp or 0) >= 180 or (v.diastolic_bp or 0) >= 120:
         bp = f"blood pressure {v.systolic_bp or '?'}/{v.diastolic_bp or '?'} mmHg"
         with_symptoms = _matched(_HTN_EMERGENCY, symptoms)
