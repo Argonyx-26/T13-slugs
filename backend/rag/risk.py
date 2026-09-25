@@ -374,7 +374,9 @@ def assess(symptoms: list[str], vitals: Vitals | None, ctx: PatientContext | Non
         readings.append((datetime.now(timezone.utc).isoformat(), vitals))
     findings += _trends(readings, history)
 
-    findings.sort(key=lambda f: LEVELS.index(f.level), reverse=True)
+    # Highest level first; at the same level a named condition ("Possible sepsis") leads the bare NEWS2 score,
+    # because the first finding is the queue's one-line label (triage_queue's top_finding)
+    findings.sort(key=lambda f: (LEVELS.index(f.level), f.source != "news2"), reverse=True)
     level = findings[0].level if findings else "low"
     return RiskAssessment(level=level, urgency=URGENCY[level], news2=n, findings=findings, gaps=gaps,
                           vitals=vitals, disclaimer=DISCLAIMER)
