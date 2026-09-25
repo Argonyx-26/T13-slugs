@@ -1,0 +1,874 @@
+// ============================================================
+// Demo patients — synthetic personas only, never real patient data.
+// ============================================================
+// The first three reuse the ids and facts of the orchestrator's fixtures
+// (backend/app/fixtures/demo_patients.json), so the same people appear when the
+// dashboard is switched to the FastAPI backend in mock mode. The rest cover the
+// RAG layer's demo scenarios and a patient registered at the desk today.
+// ============================================================
+
+import type {
+  HistoryEntry,
+  PatientCard,
+  PatientProfile,
+  PatientRecord,
+  RiskItem,
+  Sex
+} from '@/features/patients/api/types';
+import {
+  DISCLAIMER,
+  RISK_ORDER,
+  allergyStatus,
+  riskSummary,
+  sortRisks
+} from '@/features/patients/utils/record';
+
+interface MockPatient {
+  id: string;
+  displayName: string;
+  age: number;
+  sex: Sex;
+  token: number;
+  visitStatus: 'waiting' | 'seen';
+  reasonForVisit: string;
+  summary: string;
+  overview: string[];
+  profile: PatientProfile;
+  history: HistoryEntry[];
+  risks: RiskItem[];
+}
+
+const NKDA = 'No known drug allergies';
+
+const PATIENTS: MockPatient[] = [
+  {
+    id: '5f8b2a3c-9e1d-4c67-b4a2-0d7e6f3c9b81',
+    displayName: 'Deepak V.',
+    age: 38,
+    sex: 'M',
+    token: 1,
+    visitStatus: 'seen',
+    reasonForVisit: 'Repeat prescription',
+    summary: 'Hypothyroidism, stable on levothyroxine for two years. TSH normal in July.',
+    overview: [
+      'Deepak V. is a 38-year-old man with hypothyroidism since March 2022, treated with levothyroxine 50 mcg once daily. The dose has not changed for two years, and he has no known drug allergies.',
+      'His most recent TSH, 2.1 mIU/L on 20 Jul 2026, is within the normal range, as was the previous result a year earlier.',
+      'He was seen earlier today for a repeat prescription. Nothing in his record bears on today’s visit.'
+    ],
+    profile: {
+      allergies: [{ value: NKDA, source: 'clinic_db', recorded_on: '2022-03-08' }],
+      active_medications: [
+        { value: 'Levothyroxine 50 mcg once daily', source: 'clinic_db', recorded_on: '2024-07-15' }
+      ],
+      conditions: [{ value: 'Hypothyroidism', source: 'clinic_db', recorded_on: '2022-03-08' }],
+      labs: [
+        { name: 'TSH', value: '2.4 mIU/L', taken_on: '2025-07-18', source: 'clinic_db' },
+        { name: 'TSH', value: '2.1 mIU/L', taken_on: '2026-07-20', source: 'clinic_db' }
+      ]
+    },
+    history: [
+      { text: 'Lab: TSH 2.1 mIU/L, within the normal range.', source: 'clinic_db', recorded_on: '2026-07-20' },
+      { text: 'Lab: TSH 2.4 mIU/L, within the normal range.', source: 'clinic_db', recorded_on: '2025-07-18' },
+      {
+        text: 'Thyroid review: TSH now normal; levothyroxine settled at 50 mcg once daily.',
+        source: 'clinic_db',
+        recorded_on: '2024-07-15'
+      },
+      {
+        text: 'Clinic visit: hypothyroidism diagnosed after tiredness and weight gain; levothyroxine started.',
+        source: 'clinic_db',
+        recorded_on: '2022-03-08'
+      }
+    ],
+    risks: []
+  },
+  {
+    id: 'a4c7e2f9-3b6d-4e18-8f5a-2b9c0d1e7a52',
+    displayName: 'Fatima Z.',
+    age: 8,
+    sex: 'F',
+    token: 2,
+    visitStatus: 'seen',
+    reasonForVisit: 'Fever and left ear pain since yesterday',
+    summary: 'Healthy 8-year-old. One left ear infection in 2024; ear pain again today.',
+    overview: [
+      'Fatima Z. is an 8-year-old girl, brought to the clinic by her mother. She has no long-term conditions or regular medicines, and her parent reported no known drug allergies at registration.',
+      'She had a left middle-ear infection in January 2024 and a three-day viral fever in November 2025. Both settled without complications.',
+      'She was seen earlier today with fever and pain in the same (left) ear since yesterday.'
+    ],
+    profile: {
+      allergies: [
+        {
+          value: NKDA,
+          source: 'clinic_db',
+          recorded_on: '2022-06-15',
+          note: 'reported by parent at registration'
+        }
+      ],
+      active_medications: [],
+      conditions: [],
+      labs: []
+    },
+    history: [
+      {
+        text: 'Viral fever for three days; paracetamol and fluids.',
+        source: 'clinic_db',
+        recorded_on: '2025-11-03'
+      },
+      {
+        text: 'Left middle-ear infection (otitis media); recovered fully by the one-week review.',
+        source: 'clinic_db',
+        recorded_on: '2024-01-22'
+      },
+      {
+        text: 'Registration: no known drug allergies (reported by parent); immunisations up to date.',
+        source: 'clinic_db',
+        recorded_on: '2022-06-15'
+      }
+    ],
+    risks: [
+      {
+        label: 'Recurring ear infection',
+        outcome: 'Left ear infections may keep recurring.',
+        likelihood: 'low',
+        timeframe: 'Coming months',
+        reasoning:
+          'A left middle-ear infection is recorded in January 2024, and today’s complaint is pain in the same ear with fever. Two episodes in under three years is not unusual at her age.',
+        evidence: [
+          {
+            source: 'clinic_db',
+            snippet: 'Left middle-ear infection (otitis media)',
+            recorded_on: '2024-01-22'
+          }
+        ],
+        origin: 'llm'
+      }
+    ]
+  },
+  {
+    id: 'cb2759d8-3d91-4a4d-8bd2-026f68f76426',
+    displayName: 'Ravi K.',
+    age: 54,
+    sex: 'M',
+    token: 3,
+    visitStatus: 'waiting',
+    reasonForVisit: 'Sore throat and fever for three days',
+    summary:
+      'Hypertensive on amlodipine. A penicillin rash was recorded two weeks ago, but the clinic record still says no known drug allergies.',
+    overview: [
+      'Ravi K. is a 54-year-old man who has been under the clinic’s care for hypertension since November 2023, when two readings of about 150/96 mmHg led to amlodipine 5 mg once daily. His most recent recorded blood pressure, 132/84 mmHg in November 2025, was on the same dose, and no other long-term medicines are on record.',
+      'On 10 Sep 2026 his doctor recorded an urticarial rash that came on within an hour of a penicillin injection given at another clinic. That note is the only record of the allergy: the clinic’s registration record from March 2024 still lists no known drug allergies.',
+      'He is in today’s queue with a sore throat and fever of three days. Penicillin-class antibiotics are frequently prescribed for this presentation, so the allergy, and the disagreement between the two records, bear directly on any prescription at this visit.'
+    ],
+    profile: {
+      allergies: [
+        { value: NKDA, source: 'clinic_db', recorded_on: '2024-03-02' },
+        {
+          value: 'Penicillin',
+          source: 'doctor_notes',
+          recorded_on: '2026-09-10',
+          note: 'urticarial rash within an hour of a penicillin injection'
+        }
+      ],
+      active_medications: [
+        { value: 'Amlodipine 5 mg once daily', source: 'clinic_db', recorded_on: '2023-11-10' }
+      ],
+      conditions: [{ value: 'Hypertension', source: 'clinic_db', recorded_on: '2023-11-10' }],
+      labs: []
+    },
+    history: [
+      {
+        text: 'Doctor note: urticarial rash within an hour of a penicillin injection given at another clinic. Penicillin allergy recorded.',
+        source: 'doctor_notes',
+        recorded_on: '2026-09-10'
+      },
+      {
+        text: 'Blood pressure 132/84 mmHg on amlodipine 5 mg. No change to treatment.',
+        source: 'clinic_db',
+        recorded_on: '2025-11-18'
+      },
+      {
+        text: 'Registration: no known drug allergies reported.',
+        source: 'clinic_db',
+        recorded_on: '2024-03-02'
+      },
+      {
+        text: 'Clinic visit: hypertension diagnosed (about 150/96 mmHg on two readings), amlodipine 5 mg once daily started.',
+        source: 'clinic_db',
+        recorded_on: '2023-11-10'
+      }
+    ],
+    risks: [
+      {
+        label: 'Penicillin re-exposure',
+        outcome:
+          'An allergic reaction is likely on further exposure to penicillin or other penicillin-class drugs.',
+        likelihood: 'high',
+        timeframe: 'On any future exposure',
+        reasoning:
+          'The doctor’s note from 10 Sep 2026 records an urticarial rash within an hour of a penicillin injection. Today’s complaint, a sore throat with fever, is one for which penicillin-class antibiotics such as amoxicillin are often prescribed, so re-exposure at this visit is a realistic possibility.',
+        evidence: [
+          {
+            source: 'doctor_notes',
+            snippet: 'Allergy: Penicillin - urticarial rash within an hour of a penicillin injection',
+            recorded_on: '2026-09-10'
+          }
+        ],
+        origin: 'rule_engine'
+      },
+      {
+        label: 'Allergy records disagree',
+        outcome: 'The penicillin allergy may be missed by anyone reading only the clinic record.',
+        likelihood: 'moderate',
+        timeframe: 'Until the records are reconciled',
+        reasoning:
+          'The clinic record from 2 Mar 2024 says no known drug allergies, while the doctor’s note from 10 Sep 2026 records a penicillin allergy. The clinic record has not been updated since the reaction.',
+        evidence: [
+          { source: 'clinic_db', snippet: 'Allergy: No known drug allergies', recorded_on: '2024-03-02' },
+          { source: 'doctor_notes', snippet: 'Allergy: Penicillin', recorded_on: '2026-09-10' }
+        ],
+        origin: 'rule_engine'
+      }
+    ]
+  },
+  {
+    id: '91786a1e-1ee8-4f60-8191-8a74c0e3edd1',
+    displayName: 'Lakshmi S.',
+    age: 67,
+    sex: 'F',
+    token: 4,
+    visitStatus: 'waiting',
+    reasonForVisit: 'Right knee pain, worse on stairs',
+    summary:
+      'On warfarin for atrial fibrillation (INR 2.4, in range). Knee pain for six months; NSAIDs would add to her bleeding risk.',
+    overview: [
+      'Lakshmi S. is a 67-year-old woman with long-standing hypertension, treated with telmisartan 40 mg once daily since August 2022. In June 2026 she was found to have atrial fibrillation and started warfarin 5 mg once daily, with a target INR of 2 to 3.',
+      'Her INR was just below range at 1.9 four weeks after starting, and within range at 2.4 on 1 Sep 2026, on an unchanged dose. She has no known drug allergies on record.',
+      'Right knee pain on climbing stairs was first noted in March 2026 and an X-ray was advised; no X-ray result has been recorded since. The same knee pain brings her in today. Because she is anticoagulated, both the choice of pain relief and her risk of falling bear directly on bleeding risk.'
+    ],
+    profile: {
+      allergies: [{ value: NKDA, source: 'clinic_db', recorded_on: '2022-08-15' }],
+      active_medications: [
+        {
+          value: 'Warfarin 5 mg once daily',
+          source: 'clinic_db',
+          recorded_on: '2026-06-02',
+          note: 'for atrial fibrillation'
+        },
+        { value: 'Telmisartan 40 mg once daily', source: 'clinic_db', recorded_on: '2022-08-15' }
+      ],
+      conditions: [
+        { value: 'Atrial fibrillation', source: 'clinic_db', recorded_on: '2026-06-02' },
+        { value: 'Hypertension', source: 'clinic_db', recorded_on: '2022-08-15' }
+      ],
+      labs: [
+        { name: 'INR', value: '1.9', taken_on: '2026-06-30', source: 'clinic_db' },
+        { name: 'INR', value: '2.4', taken_on: '2026-09-01', source: 'clinic_db' }
+      ]
+    },
+    history: [
+      {
+        text: 'Lab: INR 2.4, within the target range of 2 to 3.',
+        source: 'clinic_db',
+        recorded_on: '2026-09-01'
+      },
+      {
+        text: 'Lab: INR 1.9, just below the target range. Warfarin dose unchanged; recheck in eight weeks.',
+        source: 'clinic_db',
+        recorded_on: '2026-06-30'
+      },
+      {
+        text: 'Clinic visit: atrial fibrillation diagnosed, warfarin 5 mg once daily started. Target INR 2 to 3.',
+        source: 'clinic_db',
+        recorded_on: '2026-06-02'
+      },
+      {
+        text: 'Doctor note: right knee pain on climbing stairs for a month. Knee X-ray advised.',
+        source: 'doctor_notes',
+        recorded_on: '2026-03-14'
+      },
+      {
+        text: 'Clinic visit: hypertension diagnosed, telmisartan 40 mg once daily started.',
+        source: 'clinic_db',
+        recorded_on: '2022-08-15'
+      }
+    ],
+    risks: [
+      {
+        label: 'NSAID bleeding risk',
+        outcome:
+          'Serious bleeding is more likely if an NSAID such as ibuprofen or diclofenac is taken with warfarin.',
+        likelihood: 'high',
+        timeframe: 'While on warfarin',
+        reasoning:
+          'She has taken warfarin 5 mg daily for atrial fibrillation since June 2026, with an INR of 2.4 on 1 Sep 2026. Her knee pain, first recorded in March 2026 and the reason for today’s visit, is a complaint often treated with NSAIDs. NSAIDs taken with an anticoagulant raise the risk of serious bleeding, including from the stomach.',
+        evidence: [
+          {
+            source: 'clinic_db',
+            snippet: 'Warfarin 5 mg once daily, for atrial fibrillation',
+            recorded_on: '2026-06-02'
+          },
+          {
+            source: 'doctor_notes',
+            snippet: 'Right knee pain on climbing stairs for a month',
+            recorded_on: '2026-03-14'
+          },
+          {
+            source: 'rule_table',
+            snippet: 'NSAIDs with an anticoagulant raise the risk of serious bleeding.'
+          }
+        ],
+        origin: 'rule_engine'
+      },
+      {
+        label: 'Fall while anticoagulated',
+        outcome: 'A fall would carry a higher risk of serious bleeding, including inside the head.',
+        likelihood: 'moderate',
+        timeframe: 'Ongoing',
+        reasoning:
+          'Knee pain on stairs has been recorded for six months, she is 67, and she is anticoagulated. The knee X-ray advised in March 2026 has no result on record, so the cause of the pain is not documented.',
+        evidence: [
+          {
+            source: 'doctor_notes',
+            snippet: 'Right knee pain on climbing stairs for a month. Knee X-ray advised.',
+            recorded_on: '2026-03-14'
+          },
+          { source: 'clinic_db', snippet: 'Warfarin 5 mg once daily', recorded_on: '2026-06-02' }
+        ],
+        origin: 'llm'
+      }
+    ]
+  },
+  {
+    id: '9c7aa0d7-24a7-4a0d-93f0-3695c5d4df45',
+    displayName: 'Arjun M.',
+    age: 45,
+    sex: 'M',
+    token: 5,
+    visitStatus: 'waiting',
+    reasonForVisit: 'Diabetes review; more tired than usual',
+    summary:
+      'Type 2 diabetes on metformin. HbA1c rose from 7.4% to 8.1% and has not been checked for eight months.',
+    overview: [
+      'Arjun M. is a 45-year-old man with type 2 diabetes, found in May 2023 and treated since then with metformin 500 mg twice daily alongside diet and exercise advice. He has no known drug allergies and no other long-term conditions on record.',
+      'His HbA1c was 7.4 % in July 2025 and 8.1 % in January 2026: above target and moving in the wrong direction, with no change of treatment recorded after either result. No HbA1c has been measured in the eight months since, and there is no record of eye, kidney or foot screening.',
+      'He comes today for a diabetes review and reports feeling more tired than usual.'
+    ],
+    profile: {
+      allergies: [{ value: NKDA, source: 'clinic_db', recorded_on: '2023-05-18' }],
+      active_medications: [
+        { value: 'Metformin 500 mg twice daily', source: 'clinic_db', recorded_on: '2023-05-18' }
+      ],
+      conditions: [{ value: 'Type 2 diabetes', source: 'clinic_db', recorded_on: '2023-05-18' }],
+      labs: [
+        { name: 'HbA1c', value: '7.4 %', taken_on: '2025-07-10', source: 'clinic_db' },
+        { name: 'HbA1c', value: '8.1 %', taken_on: '2026-01-15', source: 'clinic_db' }
+      ]
+    },
+    history: [
+      {
+        text: 'Lab: HbA1c 8.1 %, above target and higher than the previous 7.4 %.',
+        source: 'clinic_db',
+        recorded_on: '2026-01-15'
+      },
+      { text: 'Lab: HbA1c 7.4 %.', source: 'clinic_db', recorded_on: '2025-07-10' },
+      {
+        text: 'Clinic visit: type 2 diabetes diagnosed, metformin 500 mg twice daily started. Diet and exercise advice given.',
+        source: 'clinic_db',
+        recorded_on: '2023-05-18'
+      }
+    ],
+    risks: [
+      {
+        label: 'Rising HbA1c',
+        outcome: 'Blood sugar control is likely to have worsened further since the last test.',
+        likelihood: 'moderate',
+        timeframe: 'By the next HbA1c',
+        reasoning:
+          'HbA1c rose from 7.4 % in July 2025 to 8.1 % in January 2026, above target, on an unchanged metformin dose of 500 mg twice daily. No HbA1c has been recorded in the eight months since.',
+        evidence: [
+          { source: 'clinic_db', snippet: 'HbA1c 7.4 %', recorded_on: '2025-07-10' },
+          { source: 'clinic_db', snippet: 'HbA1c 8.1 %, above target', recorded_on: '2026-01-15' }
+        ],
+        origin: 'rule_engine'
+      },
+      {
+        label: 'Screening not on record',
+        outcome: 'Early diabetic eye, kidney or foot changes could go unnoticed.',
+        likelihood: 'low',
+        timeframe: 'Coming months',
+        reasoning:
+          'In three years of diabetes care there is no record of an eye examination, a kidney function or urine albumin test, or a foot examination.',
+        evidence: [
+          {
+            source: 'clinic_db',
+            snippet: 'Type 2 diabetes diagnosed, metformin 500 mg twice daily started',
+            recorded_on: '2023-05-18'
+          }
+        ],
+        origin: 'llm'
+      }
+    ]
+  },
+  {
+    id: 'b6f1c0e2-4d3a-4f7e-9a51-2c8d7e3f9a14',
+    displayName: 'Priya N.',
+    age: 34,
+    sex: 'F',
+    token: 6,
+    visitStatus: 'waiting',
+    reasonForVisit: 'Recurring one-sided headaches with nausea',
+    summary:
+      'Asthma since childhood, controlled on budesonide. Migraine-type headaches for four months; beta-blockers used to prevent migraine can trigger bronchospasm.',
+    overview: [
+      'Priya N. is a 34-year-old woman with bronchial asthma since childhood. It has been well controlled on budesonide 200 mcg twice daily, with salbutamol about once a week, apart from one flare after a viral chest infection in December 2024 that needed a short course of oral prednisolone.',
+      'Since around May 2026 she has had one-sided, throbbing headaches about twice a week, with nausea and sensitivity to light. A headache diary was started at her last visit on 28 Aug 2026. She has no known drug allergies.',
+      'She returns today with the same headaches. Medicines used to prevent migraine include non-selective beta-blockers such as propranolol, which can trigger bronchospasm in people with asthma.'
+    ],
+    profile: {
+      allergies: [{ value: NKDA, source: 'clinic_db', recorded_on: '2021-04-12' }],
+      active_medications: [
+        {
+          value: 'Budesonide 200 mcg inhaler twice daily',
+          source: 'clinic_db',
+          recorded_on: '2025-08-20'
+        },
+        {
+          value: 'Salbutamol 100 mcg inhaler as needed',
+          source: 'clinic_db',
+          recorded_on: '2025-08-20'
+        }
+      ],
+      conditions: [
+        {
+          value: 'Bronchial asthma',
+          source: 'clinic_db',
+          recorded_on: '2016-02-03',
+          note: 'since childhood'
+        }
+      ],
+      labs: []
+    },
+    history: [
+      {
+        text: 'Doctor note: headaches twice a week for three months, one-sided and throbbing, with nausea and light sensitivity. Headache diary started.',
+        source: 'doctor_notes',
+        recorded_on: '2026-08-28'
+      },
+      {
+        text: 'Asthma review: well controlled; uses salbutamol about once a week. Budesonide continued.',
+        source: 'clinic_db',
+        recorded_on: '2025-08-20'
+      },
+      {
+        text: 'Asthma flare after a viral chest infection; short course of oral prednisolone.',
+        source: 'clinic_db',
+        recorded_on: '2024-12-05'
+      },
+      { text: 'Registration: no known drug allergies.', source: 'clinic_db', recorded_on: '2021-04-12' },
+      {
+        text: 'Bronchial asthma since childhood; budesonide and salbutamol inhalers.',
+        source: 'clinic_db',
+        recorded_on: '2016-02-03'
+      }
+    ],
+    risks: [
+      {
+        label: 'Beta-blocker bronchospasm',
+        outcome: 'Bronchospasm is likely if a non-selective beta-blocker such as propranolol is started.',
+        likelihood: 'high',
+        timeframe: 'On starting the medicine',
+        reasoning:
+          'She has had bronchial asthma since childhood, with a flare needing oral prednisolone in December 2024, and uses budesonide daily with salbutamol as needed. Propranolol is widely used to prevent migraine, which fits the headaches recorded in August 2026. Non-selective beta-blockers can trigger bronchospasm in asthma.',
+        evidence: [
+          { source: 'clinic_db', snippet: 'Bronchial asthma since childhood', recorded_on: '2016-02-03' },
+          {
+            source: 'clinic_db',
+            snippet: 'Asthma flare after a viral chest infection; oral prednisolone',
+            recorded_on: '2024-12-05'
+          },
+          {
+            source: 'rule_table',
+            snippet: 'Non-selective beta-blockers can trigger bronchospasm in asthma.'
+          }
+        ],
+        origin: 'rule_engine'
+      },
+      {
+        label: 'Flare with chest infections',
+        outcome: 'Another asthma flare is possible with the next chest infection.',
+        likelihood: 'low',
+        timeframe: 'Next respiratory infection',
+        reasoning:
+          'Her one recorded flare, in December 2024, followed a viral chest infection. Her asthma was otherwise well controlled at the August 2025 review.',
+        evidence: [
+          {
+            source: 'clinic_db',
+            snippet: 'Asthma flare after a viral chest infection',
+            recorded_on: '2024-12-05'
+          }
+        ],
+        origin: 'llm'
+      }
+    ]
+  },
+  {
+    id: '4a2e9d71-8c5b-4e03-b7f6-91d2a3c4e5f8',
+    displayName: 'Meena R.',
+    age: 52,
+    sex: 'F',
+    token: 7,
+    visitStatus: 'waiting',
+    reasonForVisit: 'Always thirsty; passing urine often at night',
+    summary:
+      'HbA1c 6.2% six months ago, filed only as a lab note. Today’s thirst and night-time urination fit rising blood sugar.',
+    overview: [
+      'Meena R. is a 52-year-old woman whose only long-term treatment is atorvastatin 10 mg once daily, started in October 2024 for an LDL cholesterol of 162 mg/dL. She has no known drug allergies.',
+      'In March 2026 her HbA1c was 6.2 % with a fasting glucose of 108 mg/dL, both in the prediabetes range, and a recheck in six months was planned. That result sits only in a lab note: it is not on her list of conditions, so it is easy to miss when reading her record.',
+      'Today she reports being thirsty all the time and getting up at night to pass urine. The recheck planned in March is now due.'
+    ],
+    profile: {
+      allergies: [{ value: NKDA, source: 'clinic_db', recorded_on: '2020-01-09' }],
+      active_medications: [
+        { value: 'Atorvastatin 10 mg once daily', source: 'clinic_db', recorded_on: '2024-10-02' }
+      ],
+      conditions: [{ value: 'Raised cholesterol', source: 'clinic_db', recorded_on: '2024-10-02' }],
+      labs: [
+        { name: 'LDL cholesterol', value: '162 mg/dL', taken_on: '2024-10-02', source: 'clinic_db' },
+        { name: 'Fasting glucose', value: '108 mg/dL', taken_on: '2026-03-24', source: 'clinic_db' },
+        { name: 'HbA1c', value: '6.2 %', taken_on: '2026-03-24', source: 'clinic_db' }
+      ]
+    },
+    history: [
+      {
+        text: 'Lab: HbA1c 6.2 %, borderline. Recheck in six months.',
+        source: 'clinic_db',
+        recorded_on: '2026-03-24'
+      },
+      { text: 'Lab: fasting glucose 108 mg/dL.', source: 'clinic_db', recorded_on: '2026-03-24' },
+      {
+        text: 'Lab: LDL cholesterol 162 mg/dL. Atorvastatin 10 mg once daily started.',
+        source: 'clinic_db',
+        recorded_on: '2024-10-02'
+      },
+      { text: 'Viral fever; paracetamol and fluids.', source: 'clinic_db', recorded_on: '2023-06-11' }
+    ],
+    risks: [
+      {
+        label: 'Possible progression to diabetes',
+        outcome: 'Blood sugar may have risen into the diabetic range.',
+        likelihood: 'moderate',
+        timeframe: 'By the next HbA1c',
+        reasoning:
+          'Her HbA1c was 6.2 % on 24 Mar 2026, in the prediabetes range of 5.7 to 6.4 %, with a fasting glucose of 108 mg/dL. The six-month recheck is now due. Constant thirst and passing urine often at night, today’s complaints, are typical symptoms of raised blood sugar. The borderline result is filed only as a lab note and is not on her list of conditions.',
+        evidence: [
+          {
+            source: 'clinic_db',
+            snippet: 'HbA1c 6.2 %, borderline. Recheck in six months.',
+            recorded_on: '2026-03-24'
+          },
+          { source: 'clinic_db', snippet: 'Fasting glucose 108 mg/dL', recorded_on: '2026-03-24' }
+        ],
+        origin: 'llm'
+      }
+    ]
+  },
+  {
+    id: 'd81f3b6a-2e7c-4a95-8c14-6b0e9f2d7a33',
+    displayName: 'Farhan A.',
+    age: 61,
+    sex: 'M',
+    token: 8,
+    visitStatus: 'waiting',
+    reasonForVisit: 'Lower back pain after lifting',
+    summary:
+      'Diabetes and hypertension with falling kidney function (eGFR 51 → 42). Metformin dose is above the usual ceiling for this eGFR.',
+    overview: [
+      'Farhan A. is a 61-year-old man with type 2 diabetes since February 2021, treated with metformin 1 g twice daily, and hypertension since May 2022 on amlodipine 10 mg once daily. He is allergic to sulfonamides: he had a rash after co-trimoxazole in 2019.',
+      'His kidney function is falling. His eGFR was 51 in August 2025 and 42 in June 2026, when chronic kidney disease stage 3b was recorded. His diabetes control was reasonable at the same test, with an HbA1c of 7.0 %. The metformin dose on record has not changed since kidney function began to decline.',
+      'He comes today with lower back pain after lifting. Both the metformin dose and any pain relief that affects the kidneys bear on his falling eGFR.'
+    ],
+    profile: {
+      allergies: [
+        {
+          value: 'Sulfonamides',
+          source: 'clinic_db',
+          recorded_on: '2019-07-22',
+          note: 'rash after co-trimoxazole'
+        }
+      ],
+      active_medications: [
+        { value: 'Metformin 1 g twice daily', source: 'clinic_db', recorded_on: '2021-02-10' },
+        { value: 'Amlodipine 10 mg once daily', source: 'clinic_db', recorded_on: '2022-05-06' }
+      ],
+      conditions: [
+        { value: 'Type 2 diabetes', source: 'clinic_db', recorded_on: '2021-02-10' },
+        { value: 'Hypertension', source: 'clinic_db', recorded_on: '2022-05-06' },
+        { value: 'Chronic kidney disease, stage 3b', source: 'clinic_db', recorded_on: '2026-06-18' }
+      ],
+      labs: [
+        { name: 'eGFR', value: '51 mL/min/1.73m²', taken_on: '2025-08-12', source: 'clinic_db' },
+        { name: 'eGFR', value: '42 mL/min/1.73m²', taken_on: '2026-06-18', source: 'clinic_db' },
+        { name: 'HbA1c', value: '7.0 %', taken_on: '2026-06-18', source: 'clinic_db' }
+      ]
+    },
+    history: [
+      {
+        text: 'Lab: eGFR 42, down from 51 in August 2025. HbA1c 7.0 %. Chronic kidney disease stage 3b recorded.',
+        source: 'clinic_db',
+        recorded_on: '2026-06-18'
+      },
+      { text: 'Lab: eGFR 51 mL/min/1.73m².', source: 'clinic_db', recorded_on: '2025-08-12' },
+      {
+        text: 'Clinic visit: hypertension diagnosed, amlodipine 10 mg once daily started.',
+        source: 'clinic_db',
+        recorded_on: '2022-05-06'
+      },
+      {
+        text: 'Clinic visit: type 2 diabetes diagnosed; metformin started and increased to 1 g twice daily.',
+        source: 'clinic_db',
+        recorded_on: '2021-02-10'
+      },
+      {
+        text: 'Rash after co-trimoxazole; sulfonamide allergy recorded.',
+        source: 'clinic_db',
+        recorded_on: '2019-07-22'
+      }
+    ],
+    risks: [
+      {
+        label: 'Metformin vs kidney function',
+        outcome: 'Metformin may build up in the blood at the current dose as kidney function falls.',
+        likelihood: 'moderate',
+        timeframe: 'Coming months',
+        reasoning:
+          'His eGFR fell from 51 in August 2025 to 42 on 18 Jun 2026. His recorded metformin dose, 1 g twice daily (2,000 mg a day), is above the ceiling in common prescribing guidance for an eGFR between 30 and 44, which is 1,000 mg a day.',
+        evidence: [
+          { source: 'clinic_db', snippet: 'eGFR 51 mL/min/1.73m²', recorded_on: '2025-08-12' },
+          { source: 'clinic_db', snippet: 'eGFR 42 mL/min/1.73m²', recorded_on: '2026-06-18' },
+          { source: 'clinic_db', snippet: 'Metformin 1 g twice daily', recorded_on: '2021-02-10' }
+        ],
+        origin: 'rule_engine'
+      },
+      {
+        label: 'NSAIDs and kidney function',
+        outcome: 'Kidney function may fall further if an NSAID is taken for the back pain.',
+        likelihood: 'moderate',
+        timeframe: 'During any NSAID course',
+        reasoning:
+          'NSAIDs can reduce kidney function, and his eGFR is already 42 and falling. Today’s lower back pain is a complaint often treated with NSAIDs.',
+        evidence: [
+          { source: 'clinic_db', snippet: 'eGFR 42 mL/min/1.73m²', recorded_on: '2026-06-18' }
+        ],
+        origin: 'llm'
+      },
+      {
+        label: 'Sulfonamide allergy',
+        outcome: 'An allergic reaction is likely on further exposure to sulfonamides.',
+        likelihood: 'moderate',
+        timeframe: 'On any future exposure',
+        reasoning: 'The clinic record from 22 Jul 2019 records a sulfonamide allergy: a rash after co-trimoxazole.',
+        evidence: [
+          {
+            source: 'clinic_db',
+            snippet: 'Allergy: Sulfonamides - rash after co-trimoxazole',
+            recorded_on: '2019-07-22'
+          }
+        ],
+        origin: 'rule_engine'
+      }
+    ]
+  },
+  {
+    id: '7c3a5e19-b2d4-4f86-a0e1-3f9b8c6d2e47',
+    displayName: 'Kavya D.',
+    age: 29,
+    sex: 'F',
+    token: 9,
+    visitStatus: 'waiting',
+    reasonForVisit: 'Headache for four days; swollen feet (26 weeks pregnant)',
+    summary:
+      '26 weeks pregnant. Blood pressure has climbed from 112/70 to 138/88; today she has a headache and swollen feet.',
+    overview: [
+      'Kavya D. is 29 and 26 weeks into her first pregnancy, due on 1 Jan 2027. At her booking visit at 11 weeks her blood pressure was 112/70 mmHg, her urine showed no protein, and her haemoglobin was 10.8 g/dL, for which iron was started along with folic acid.',
+      'Her blood pressure was 118/76 mmHg at 19 weeks, when the anomaly scan was normal, and 138/88 mmHg at 24 weeks, with a recheck planned in two weeks. Neither urine protein nor haemoglobin has been measured since booking.',
+      'She comes today, at 26 weeks, with a headache for four days and swollen feet.'
+    ],
+    profile: {
+      allergies: [{ value: NKDA, source: 'clinic_db', recorded_on: '2026-06-12' }],
+      active_medications: [
+        { value: 'Folic acid 400 mcg once daily', source: 'clinic_db', recorded_on: '2026-06-12' },
+        { value: 'Ferrous sulphate 200 mg once daily', source: 'clinic_db', recorded_on: '2026-06-12' }
+      ],
+      conditions: [
+        {
+          value: 'Pregnancy, 26 weeks',
+          source: 'clinic_db',
+          recorded_on: '2026-06-12',
+          note: 'first pregnancy; due 1 Jan 2027'
+        }
+      ],
+      labs: [
+        { name: 'Haemoglobin', value: '10.8 g/dL', taken_on: '2026-06-12', source: 'clinic_db' },
+        { name: 'Urine protein', value: 'Nil', taken_on: '2026-06-12', source: 'clinic_db' }
+      ]
+    },
+    history: [
+      {
+        text: 'Antenatal check at 24 weeks: BP 138/88 mmHg. Recheck in two weeks.',
+        source: 'clinic_db',
+        recorded_on: '2026-09-11'
+      },
+      {
+        text: 'Antenatal check at 19 weeks: BP 118/76 mmHg; anomaly scan normal.',
+        source: 'clinic_db',
+        recorded_on: '2026-08-07'
+      },
+      {
+        text: 'Booking visit at 11 weeks: BP 112/70 mmHg; haemoglobin 10.8 g/dL; urine protein nil. Folic acid and iron started.',
+        source: 'clinic_db',
+        recorded_on: '2026-06-12'
+      }
+    ],
+    risks: [
+      {
+        label: 'Rising blood pressure in pregnancy',
+        outcome: 'Pre-eclampsia may be developing.',
+        likelihood: 'moderate',
+        timeframe: 'Coming days to weeks',
+        reasoning:
+          'Her blood pressure rose from 112/70 mmHg at booking to 138/88 mmHg at 24 weeks. She is now 26 weeks pregnant with a four-day headache and swollen feet. Rising blood pressure after 20 weeks together with headache is a recognised warning pattern for pre-eclampsia. Urine protein has not been tested since booking.',
+        evidence: [
+          { source: 'clinic_db', snippet: 'Booking visit: BP 112/70 mmHg', recorded_on: '2026-06-12' },
+          { source: 'clinic_db', snippet: 'Antenatal check at 24 weeks: BP 138/88 mmHg', recorded_on: '2026-09-11' }
+        ],
+        origin: 'llm'
+      },
+      {
+        label: 'Anaemia not rechecked',
+        outcome: 'Anaemia may persist into the third trimester.',
+        likelihood: 'low',
+        timeframe: 'Third trimester',
+        reasoning:
+          'Her haemoglobin was 10.8 g/dL at booking, below the usual threshold of 11 g/dL in early pregnancy, and iron was started. It has not been measured since.',
+        evidence: [
+          { source: 'clinic_db', snippet: 'Haemoglobin 10.8 g/dL', recorded_on: '2026-06-12' }
+        ],
+        origin: 'llm'
+      }
+    ]
+  },
+  {
+    id: '1e9d4c7b-6a3f-4b28-9d05-8e2c1b7a4f66',
+    displayName: 'Arun P.',
+    age: 28,
+    sex: 'M',
+    token: 10,
+    visitStatus: 'waiting',
+    reasonForVisit: 'Runny nose and sore throat for two days',
+    summary: 'Healthy, with no long-term conditions or medicines. Seen twice in five years for minor illnesses.',
+    overview: [
+      'Arun P. is a 28-year-old man with no long-term conditions, no regular medicines and no known drug allergies.',
+      'His record holds only minor episodes: an influenza vaccination in October 2023 and a right ankle sprain while playing football in February 2025, treated with rest and paracetamol.',
+      'He comes today with a runny nose and sore throat for two days. Nothing in his history bears on today’s complaint.'
+    ],
+    profile: {
+      allergies: [{ value: NKDA, source: 'clinic_db', recorded_on: '2021-09-01' }],
+      active_medications: [],
+      conditions: [],
+      labs: []
+    },
+    history: [
+      {
+        text: 'Right ankle sprain playing football. Rest, ice, compression; paracetamol as needed.',
+        source: 'clinic_db',
+        recorded_on: '2025-02-14'
+      },
+      { text: 'Influenza vaccination given.', source: 'clinic_db', recorded_on: '2023-10-30' },
+      {
+        text: 'Registration: no known drug allergies; no long-term conditions.',
+        source: 'clinic_db',
+        recorded_on: '2021-09-01'
+      }
+    ],
+    risks: []
+  },
+  {
+    id: '2d6f9a1c-7e4b-4a3d-95c8-6f1e0b2a8d19',
+    displayName: 'Sunita B.',
+    age: 41,
+    sex: 'F',
+    token: 11,
+    visitStatus: 'waiting',
+    reasonForVisit: 'Cough for two weeks',
+    summary: 'Registered at the reception desk today. No history yet, and her allergy status was not recorded.',
+    overview: [
+      'Sunita B. is a 41-year-old woman registered at the reception desk today. She has no previous records at this clinic.',
+      'Her allergy status was left blank at registration, so it is unknown rather than "none": nobody has yet confirmed that she has no allergies.',
+      'She comes today with a cough for two weeks. Her record will build from this consultation once the doctor approves the note.'
+    ],
+    profile: { allergies: [], active_medications: [], conditions: [], labs: [] },
+    history: [],
+    risks: []
+  }
+];
+
+function toRecord(p: MockPatient): PatientRecord {
+  const risks = sortRisks(p.risks);
+  const dates = [
+    ...p.history.map((h) => h.recorded_on),
+    ...p.profile.labs.map((l) => l.taken_on)
+  ].filter((d): d is string => Boolean(d));
+  const hasRecords = p.history.length > 0 || p.profile.allergies.length > 0;
+
+  return {
+    id: p.id,
+    displayName: p.displayName,
+    age: p.age,
+    sex: p.sex,
+    token: p.token,
+    visitStatus: p.visitStatus,
+    reasonForVisit: p.reasonForVisit,
+    summary: p.summary,
+    conditions: p.profile.conditions.map((c) => c.value),
+    allergy: allergyStatus(p.profile.allergies),
+    risk: riskSummary(risks, hasRecords),
+    lastRecordOn: dates.toSorted().at(-1) ?? null,
+    isNew: p.history.length === 0,
+    overview: p.overview,
+    profile: p.profile,
+    risks,
+    history: p.history,
+    disclaimer: DISCLAIMER
+  };
+}
+
+function toCard(record: PatientRecord): PatientCard {
+  const {
+    overview: _overview,
+    profile: _profile,
+    risks: _risks,
+    history: _history,
+    disclaimer: _disclaimer,
+    ...card
+  } = record;
+  return card;
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export const fakePatients = {
+  records: PATIENTS.map(toRecord),
+
+  async getPatients(): Promise<PatientCard[]> {
+    await delay(150);
+    return [...this.records]
+      .toSorted((a, b) => RISK_ORDER[a.risk.level] - RISK_ORDER[b.risk.level] || (a.token ?? 0) - (b.token ?? 0))
+      .map(toCard);
+  },
+
+  async getPatientById(id: string): Promise<PatientRecord | null> {
+    await delay(150);
+    return this.records.find((p) => p.id === id) ?? null;
+  }
+};

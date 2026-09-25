@@ -1,0 +1,20 @@
+import { queryOptions } from '@tanstack/react-query';
+import { getPatientById, getPatients } from './service';
+
+export const patientKeys = {
+  all: ['patients'] as const,
+  list: () => [...patientKeys.all, 'list'] as const,
+  detail: (id: string) => [...patientKeys.all, 'detail', id] as const
+};
+
+export const patientsQueryOptions = () =>
+  queryOptions({
+    queryKey: patientKeys.list(),
+    queryFn: () => getPatients()
+  });
+
+export const patientByIdOptions = (id: string) =>
+  queryOptions({
+    queryKey: patientKeys.detail(id),
+    queryFn: () => getPatientById(id)
+  });
