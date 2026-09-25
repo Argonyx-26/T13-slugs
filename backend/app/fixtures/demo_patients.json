@@ -1,0 +1,92 @@
+{
+  "_comment": "Synthetic personas only. Never put real patient data in this file or anywhere in the demo setup. queue_token = position in the demo's 'today's queue', whatever the date.",
+  "patients": [
+    {
+      "patient_uuid": "cb2759d8-3d91-4a4d-8bd2-026f68f76426",
+      "display_name": "Ravi K.",
+      "first_names": ["Ravi"],
+      "age": 54,
+      "sex": "M",
+      "scenario": "penicillin",
+      "queue_token": 1,
+      "allergies": [
+        {"value": "No known drug allergies", "source": "clinic_db", "recorded_on": "2024-03-02"},
+        {"value": "Penicillin", "source": "doctor_notes", "recorded_on": "2026-09-10",
+         "note": "urticarial rash within an hour of a penicillin injection"}
+      ],
+      "active_medications": [
+        {"value": "Amlodipine 5 mg once daily", "source": "clinic_db", "recorded_on": "2023-11-10"}
+      ],
+      "conditions": [{"value": "Hypertension", "source": "clinic_db", "recorded_on": "2023-11-10"}],
+      "labs": [],
+      "history": [
+        {"text": "Doctor note: urticarial rash within an hour of a penicillin injection given at another clinic. Penicillin allergy recorded.",
+         "source": "doctor_notes", "recorded_on": "2026-09-10"},
+        {"text": "Clinic visit: hypertension diagnosed, amlodipine 5 mg started.",
+         "source": "clinic_db", "recorded_on": "2023-11-10"}
+      ]
+    },
+    {
+      "patient_uuid": "91786a1e-1ee8-4f60-8191-8a74c0e3edd1",
+      "display_name": "Lakshmi S.",
+      "first_names": ["Lakshmi"],
+      "age": 67,
+      "sex": "F",
+      "scenario": "warfarin",
+      "queue_token": 2,
+      "allergies": [
+        {"value": "No known drug allergies", "source": "clinic_db", "recorded_on": "2022-08-15"}
+      ],
+      "active_medications": [
+        {"value": "Warfarin 5 mg once daily", "source": "clinic_db", "recorded_on": "2026-06-02",
+         "note": "for atrial fibrillation"},
+        {"value": "Telmisartan 40 mg once daily", "source": "clinic_db", "recorded_on": "2022-08-15"}
+      ],
+      "conditions": [
+        {"value": "Atrial fibrillation", "source": "clinic_db", "recorded_on": "2026-06-02"},
+        {"value": "Hypertension", "source": "clinic_db", "recorded_on": "2022-08-15"}
+      ],
+      "labs": [
+        {"name": "INR", "value": "2.4", "taken_on": "2026-09-01", "source": "clinic_db"}
+      ],
+      "history": [
+        {"text": "Lab: INR 2.4, within the target range of 2 to 3.",
+         "source": "clinic_db", "recorded_on": "2026-09-01"},
+        {"text": "Clinic visit: atrial fibrillation diagnosed, warfarin 5 mg once daily started. Target INR 2 to 3.",
+         "source": "clinic_db", "recorded_on": "2026-06-02"},
+        {"text": "Doctor note: right knee pain on climbing stairs for a month. Knee X-ray advised.",
+         "source": "doctor_notes", "recorded_on": "2026-03-14"},
+        {"text": "Clinic visit: hypertension diagnosed, telmisartan 40 mg once daily started.",
+         "source": "clinic_db", "recorded_on": "2022-08-15"}
+      ]
+    },
+    {
+      "patient_uuid": "9c7aa0d7-24a7-4a0d-93f0-3695c5d4df45",
+      "display_name": "Arjun M.",
+      "first_names": ["Arjun"],
+      "age": 45,
+      "sex": "M",
+      "scenario": "diabetes",
+      "queue_token": 3,
+      "allergies": [
+        {"value": "No known drug allergies", "source": "clinic_db", "recorded_on": "2023-05-18"}
+      ],
+      "active_medications": [
+        {"value": "Metformin 500 mg twice daily", "source": "clinic_db", "recorded_on": "2023-05-18"}
+      ],
+      "conditions": [{"value": "Type 2 diabetes", "source": "clinic_db", "recorded_on": "2023-05-18"}],
+      "labs": [
+        {"name": "HbA1c", "value": "7.4 %", "taken_on": "2025-07-10", "source": "clinic_db"},
+        {"name": "HbA1c", "value": "8.1 %", "taken_on": "2026-01-15", "source": "clinic_db"}
+      ],
+      "history": [
+        {"text": "Lab: HbA1c 8.1 %, above target and higher than the previous 7.4 %.",
+         "source": "clinic_db", "recorded_on": "2026-01-15"},
+        {"text": "Lab: HbA1c 7.4 %.",
+         "source": "clinic_db", "recorded_on": "2025-07-10"},
+        {"text": "Clinic visit: type 2 diabetes diagnosed, metformin 500 mg twice daily started. Diet and exercise advice given.",
+         "source": "clinic_db", "recorded_on": "2023-05-18"}
+      ]
+    }
+  ]
+}

@@ -10,7 +10,9 @@
 | **Other modules** | 1: Flutter frontend (web + mobile) · 2: STT (Shriya) · 3: RAG database (Sanjana) · 4: LLM Central Brain + Privacy (Shreyas, next) |
 | **Hosting** | Kaggle notebook (GPU T4 ×2) + ngrok free static domain. **$0.** |
 | **Team workflow** | Every module is built independently and merged at the end of the hackathon |
-| **Verification** | Every orchestrator Python block below was executed while writing this plan, and was machine-checked against the tested prototype. The 38-test suite passed on Python 3.12.10 and 3.14.6 with the pinned versions in Appendix A. Blocks that can only run on Kaggle, and code for teammates' modules or the Flutter app, are labelled **not run here** / **untested sketch**. |
+| **Verification** | Every orchestrator Python block below was executed while writing this plan, and was machine-checked against the tested prototype. The original 38-test suite passed on Python 3.12.10 and 3.14.6 with the pinned versions in Appendix A; after the 25 Sep 2026 updates the suite has 55 tests and passes on Python 3.13.5. Blocks that can only run on Kaggle, and code for teammates' modules or the Flutter app, are labelled **not run here** / **untested sketch**. |
+| **Update, 25 Sep 2026** | Team decision: notes are now **saved automatically**, marked `ai_scribe` (not yet reviewed), then the AI **updates the patient record** (new facts only, redundant ones ignored) and **predicts likely outcomes** from the whole history for the doctor's website. No advice, ever. The doctor can still confirm, correct or discard each note. Changed sections: §0.1, §2, §3, §4, §5, Steps 1, 2, 4, 6, 10, **10b (new)**, 11, 12, 14, 15, 16, §7, §8. |
+| **Update 2, 25 Sep 2026** | **The doctor's phone only picks the patient and records.** It lists **today's clinic queue** (owned by the RAG module; `GET /visits/today`), with name search for walk-ins. The upload carries `patient_uuid` **and** the picked `visit_id`, and the server refuses it if they disagree (`409 VISIT_PATIENT_MISMATCH`), so a recording can only land on the patient the doctor tapped. The 202 names the patient the server linked it to, and the entry is marked `seen`. Everything is reviewed on the **website**, which finds the phone's recordings through the queue or `GET /jobs?patient_uuid=`. Changed sections: §0.1, §3.6, §4, §4.1, §5, Steps 1, 2, 3, 4, 6, 10, 11, 12, 14, 16.4, Appendix B. |
 
 ---
 
@@ -18,16 +20,18 @@
 
 ### 0.1 What the orchestrator does, in plain language
 
-The orchestrator is the **traffic controller** of the whole product. The Flutter app sends it one thing: the recording of a consultation plus the ID of the patient. It gives back one thing: a **draft clinical note with safety alerts**, which the doctor reads, edits if needed, and approves.
+The orchestrator is the **traffic controller** of the whole product. The doctor's phone does two things only: the doctor **taps the patient** who is walking in, from today's clinic queue, and **records**. When the doctor taps **Stop recording**, the phone sends the orchestrator one thing: the recording of the consultation (m4a, WebM, mp3, …) plus the ID of the patient (and of their place in today's queue, which must match). Everything the doctor reviews appears on the doctor's website. It gives back one thing: a **clinical note with safety alerts, already saved to the patient's record**, plus what was newly added to the record and the **likely outcomes** for this patient. The doctor can still confirm, correct or discard the note.
 
-In between, the orchestrator runs the recording through six steps, in a fixed order:
+In between, the orchestrator runs the recording through eight steps, in a fixed order:
 
 1. **Transcribe.** Turn the recording into text, split by speaker.
 2. **Write the note.** Translate the Kannada/English conversation into a structured English note.
 3. **Remove personal details.** Names, phone numbers and ID numbers are taken out.
 4. **Look up the patient's history and the latest drug information**, at the same time.
 5. **Check for danger.** Allergies, drug interactions, contradictions, overdue tests.
-6. **Hand the draft to the doctor.** Nothing is saved until the doctor approves it.
+6. **Save the note to the patient's record automatically**, marked "AI scribe, not yet reviewed". Until the doctor confirms it, it can never override the doctor's own notes or the clinic's records.
+7. **Update the patient record.** The AI picks out the new long-term facts (allergies, ongoing medications, conditions); anything already on record is ignored.
+8. **Predict likely outcomes.** The AI re-reads the patient's whole history and lists what is likely to happen, each with its reason and the records it rests on. It never suggests a procedure or gives advice.
 
 The orchestrator does no AI work itself. It calls the other modules in the right order, keeps the GPU from being overloaded, protects patient privacy, and makes sure that when a piece breaks, **the doctor sees that it broke**. A broken check must never look like "all clear".
 
@@ -39,7 +43,7 @@ The orchestrator does no AI work itself. It calls the other modules in the right
 | 2 | **Every model call runs in a worker thread.** | The real models block. Called directly, one upload would freeze the whole server, including the progress checks. |
 | 3 | **One GPU slot and a visible queue.** | Two jobs at once on a 16 GB GPU run out of memory and crash. |
 | 4 | **Typed data plus one adapter per teammate module.** | Modules are merged at the end, so each mismatch must stay inside one small file instead of spreading through the pipeline. |
-| 5 | **The doctor approves before anything is saved.** | An AI mistake saved as a "recent doctor note" would override correct clinic records at the next visit. |
+| 5 | **Notes are saved automatically but marked `ai_scribe` until the doctor confirms them** (updated 25 Sep 2026; originally "the doctor approves before anything is saved"). | An AI mistake must never become "recent doctor note" truth that overrides correct clinic records at the next visit. |
 | 6 | **A privacy wall right after the note is written.** | Web search, history lookup, the second AI pass and storage only ever see scrubbed text. |
 | 7 | **Tavily web research as its own step, with a strict query rule.** | Only generic drug names from our own list can ever leave the server. |
 | 8 | **A deterministic safety check alongside the AI.** | The key demo alert (Amoxicillin for a Penicillin-allergic patient) must never depend on the LLM happening to notice. |
@@ -82,14 +86,14 @@ text. When all tests pass, stop and report.
 | 4 | GPU safety | No limit on parallel jobs, and no plan for model loading. `final-project-stack.md` makes the orchestrator responsible for VRAM. | Two uploads at once run out of GPU memory and crash, and loading a model per request is slow. | One GPU slot with a queue position; `429 BUSY` beyond 4 pending jobs. Models load once at startup. `GPU_POLICY=resident\|swap`. One uvicorn worker. |
 | 5 | Loose data types | `transcribe → str`, `get_patient_context → str`, `generate → dict`, `save → bool`. | Speakers, sources and dates are lost, so the RAG design's **"recent doctor note beats older clinic data"** rule can't work, and alerts can't cite evidence. Errors surface at the very end. | Typed Pydantic models and service interfaces in `app/contracts.py` (§4). Allergies, medications and labs arrive as **structured facts with a source and date**, never dependent on similarity search. |
 | 6 | Merge at the end | The pipeline would call teammates' functions directly, with guessed names and shapes. | Any mismatch (sync/async, file vs bytes, dict keys, device, language codes) breaks the core pipeline at the worst possible time, with no fallback. | **Adapter layer.** The pipeline never imports teammate code. Merge day = write one adapter file per module, test it alone with `scripts/probe_module.py`, then flip one config switch. Each service can be flipped back to its mock. |
-| 7 | Clinical safety | The AI note is saved automatically. | Combined with the precedence rule above, an unreviewed AI mistake becomes "recent doctor note" truth that overrides correct clinic data next visit. It also undercuts our own "automation complacency" argument (`Competitive_Analysis_Moat.md`). | **Draft → doctor reviews/edits → Approve → scrubbed again → saved.** |
+| 7 | Clinical safety | The AI note is saved automatically, as if the doctor wrote it. | Combined with the precedence rule above, an unreviewed AI mistake becomes "recent doctor note" truth that overrides correct clinic data next visit. It also undercuts our own "automation complacency" argument (`Competitive_Analysis_Moat.md`). | **Saved automatically, but as `ai_scribe`** (25 Sep 2026 update): AI facts still raise alerts but never take precedence. The doctor confirms (edits are scrubbed again, and the note becomes `doctor_notes`) or discards (the note and its facts are removed). |
 | 8 | Clinical safety | `ai_warnings: List[str]`. If the history lookup fails, the note silently has no warnings. | The doctor can't see *why* something was flagged, and "no warnings" reads as "safe". | `SafetyAlert` with category, severity, evidence (source, date, URL) and origin. A `checks` report on every note. A top alert when a cross-check was **not** performed. |
 | 9 | Demo reliability | The Amoxicillin-vs-Penicillin moment depends entirely on the LLM. | One miss in front of the judges sinks the pitch. | A small deterministic rule check that runs on every draft: drug classes, Indian brand names, interaction pairs, the contradiction rule, and a lab-monitoring rule. Rule alerts win over duplicate AI alerts. |
 | 10 | Privacy | Audio written to a disk `/temp`. No Presidio step anywhere. The mock `print`s note data. | Contradicts the "raw audio never touches disk" line of `Audio_Processing_Pipeline.md`. Starlette also writes every upload over 1 MB to disk by itself. Kaggle keeps printed output in saved notebook versions. | Audio stays in RAM (`/dev/shm` + raised `MultiPartParser.spool_max_size`, tested) and is deleted right after STT. A privacy wall that **fails closed**. A logger that cannot print patient text (tested). Jobs and drafts expire from memory. |
 | 11 | Web research missing | No Tavily step, though "we search the web for the latest FDA warnings" is part of our moat. | If the AI writes its own search queries, a patient's name could be sent to an outside company. Tavily can also be slow, down, or out of its 1,000 free credits a month. | A research step with a **fixed query template built only from generic drug names in our vocabulary**, trusted-domain filtering, a timeout, a 24-hour cache, and pre-fetching of the demo drugs. If it fails, the job continues and says so. |
 | 12 | Frontend fit | Accepts only `audio/mpeg` and `audio/wav`. | Flutter Web records **WebM/Opus**, Flutter mobile records **m4a/AAC**, and Dart's `MultipartFile.fromPath` sends **`application/octet-stream`** unless told otherwise. Real uploads would be rejected. | Accept by MIME type *or* audio file extension. Size and empty-file checks. One error format for everything (§5.2). |
 | 13 | Missing API | No patient list, profile, history, similar-case search, Q&A, deletion, or readiness check. | The app can't show a patient picker, and moat features from the docs (global similarity search, "refuses to diagnose", cascading deletion) have no endpoint. | P0/P1/P2 endpoints (§5.1). |
-| 14 | Testing & operations | No tests, no smoke test, no warm-up, and `/health` always says "ok". | Problems would be found live, on stage. | 38-test pytest suite (~1 s), a PHI-in-logs test, a smoke-test script, a merge-day probe script, and a real `/ready`. |
+| 14 | Testing & operations | No tests, no smoke test, no warm-up, and `/health` always says "ok". | Problems would be found live, on stage. | A pytest suite (38 tests originally, 50 since the 25 Sep update, ~3 s), a PHI-in-logs test, a smoke-test script, a merge-day probe script, and a real `/ready`. |
 
 The first plan's single endpoint `POST /api/process-consultation` becomes `POST /api/v1/consultations` (returns a job) plus `GET /api/v1/jobs/{job_id}` (progress and result).
 
@@ -107,7 +111,8 @@ These are outside Module 5, but they change what the orchestrator must handle an
 | Embeddings | `BAAI/bge-small-en-v1.5` (English-only) | Queries would be Kanglish transcripts | The history lookup runs **after** translation, using the English note as the query, so English-only embeddings work. |
 | Web research | Tavily (`centralbrain.md`, confirmed by the team) | `final-project-stack.md` and the zero-trust pitch don't mention it | Kept, with the "generic drug names only" query rule (§6 Step 9), so zero-trust still holds. |
 | Frontend | Flutter web + mobile (confirmed) | Next.js / React Native (older docs) | Flutter. |
-| RAG source tag | `source: doctor_personal_notes` (`RAG_Database_Architecture.md`) | — | Our models call it `doctor_notes`. The RAG adapter maps between the two on merge day. |
+| RAG source tag | `source: doctor_personal_notes` (`RAG_Database_Architecture.md`) | — | Our models call it `doctor_notes`, plus a new `ai_scribe` tag for automatically saved, unreviewed notes. The RAG adapter maps between them on merge day. |
+| Predictions | `centralbrain.md`: the AI never offers medical opinions | Team decision (25 Sep 2026): show likely outcomes, with reasons, on the doctor's website | Kept analytical: every prediction states a likelihood, its reasoning and the records it cites; no advice, no procedures, no diagnosis; AI predictions that give advice or cite nothing are withheld. ⚠️ Soften the pitch line "never offers opinions" to "never gives advice". |
 
 ### 1.4 Risks in other modules that the orchestrator must absorb
 
@@ -134,8 +139,10 @@ All of these were checked against library source code or documentation while wri
 | **Kaggle notebook is the only host** (T4 ×2, free), exposed through ngrok's free static domain | $0 budget. The static domain means the Flutter app's URL never changes when the notebook restarts. |
 | **Ambient recording only**, Kannada + English, with speakers separated | Matches `final-project-stack.md`, the team's source of truth. |
 | **Background job + polling** instead of one long request | Minutes of processing can't safely hang on one HTTP call, and polling gives the progress display for free. |
-| **The doctor approves before saving** | Keeps AI mistakes out of the patient's long-term memory. `AUTO_APPROVE=true` exists for tests only. |
-| **Pipeline order: transcribe → write note → scrub → (history ∥ web) → safety → draft** | Scrubbing right after the note is written means nothing downstream (web, database, second AI pass) sees identifiers. It also gives the English history lookup and Tavily the English drug names they need. |
+| **Saved automatically, marked `ai_scribe` until the doctor confirms** (25 Sep 2026) | The doctor doesn't have to tap anything for the note to reach the record, yet an unreviewed AI fact can never take precedence over the doctor's notes or the clinic's records. It still raises alerts (the safe side). |
+| **Pipeline order: transcribe → write note → scrub → (history ∥ web) → safety → save → record update → predictions** | Scrubbing right after the note is written means nothing downstream (web, database, later AI passes) sees identifiers. It also gives the English history lookup and Tavily the English drug names they need. Predictions come last so they read the record including today's consultation. |
+| **Record update: new facts only** | The AI proposes the note's long-term facts; a deterministic check drops anything already on record (brand vs generic, dose, synonyms) and never lets the AI drop a possibly new allergy. |
+| **Predictions: likely outcomes with reasons, never advice, never stored** | They inform the doctor's own assessment. Each cites records; AI predictions that give advice or cite nothing are withheld. Kept in memory only, so the AI never learns from its own guesses. |
 | **Modules merged at the end, through adapters** | The team's chosen workflow. Adapters keep each merge problem inside one small file, and each module can be switched back to its mock. |
 | **Tavily queries = generic drug name + fixed words, nothing else** | The only data that ever leaves the server is a word like "amoxicillin". |
 | **A deterministic rule check runs alongside the AI review** | The demo's key alerts must be guaranteed. Rule alerts are auditable, which medical judges like. |
@@ -151,8 +158,9 @@ All of these were checked against library source code or documentation while wri
 
 ```mermaid
 flowchart LR
-    APP["Flutter app (web + mobile)"] -- "POST /api/v1/consultations<br/>audio + patient_uuid" --> API["FastAPI orchestrator<br/>(Kaggle notebook, via ngrok)"]
-    APP -- "GET /api/v1/jobs/{id}<br/>every 2 s" --> API
+    PHONE["Doctor's phone<br/>(Flutter mobile)"] -- "GET /api/v1/visits/today<br/>pick the patient" --> API["FastAPI orchestrator<br/>(Kaggle notebook, via ngrok)"]
+    PHONE -- "POST /api/v1/consultations<br/>audio + patient_uuid + visit_id" --> API
+    APP["Doctor's website<br/>(Flutter web)"] -- "GET /api/v1/jobs/{id}<br/>every 2 s" --> API
     API --> S1["1 · Transcribe<br/>STT adapter → WhisperX, GPU 0"]
     S1 --> S2["2 · Write note<br/>LLM pass 1, GPU 1"]
     S2 --> S3["3 · Privacy wall<br/>Presidio"]
@@ -160,8 +168,14 @@ flowchart LR
     S3 --> S4b["4b · Web research<br/>Tavily"]
     S4a --> S5["5 · Safety check<br/>LLM pass 2 + rules"]
     S4b --> S5
-    S5 --> D["6 · Draft for review"]
-    D -- "doctor taps Approve" --> DB[("Doctor's DB + vector store<br/>(RAG module)")]
+    S5 --> S6["6 · Save automatically<br/>(ai_scribe, not yet reviewed)"]
+    S6 --> DB[("Doctor's DB + vector store<br/>(RAG module)")]
+    S6 --> S7["7 · Record update<br/>LLM pass 3 + duplicate check"]
+    S7 -- "new facts only" --> DB
+    S7 --> S8["8 · Predict likely outcomes<br/>LLM pass 4 + rules, whole history"]
+    DB --> S8
+    S8 -- "note, alerts, new facts, predictions" --> APP
+    APP -- "doctor confirms / corrects / discards" --> DB
 ```
 
 ### 3.2 The stages a job moves through
@@ -176,14 +190,20 @@ The `stage` value is what the app receives when polling. The label is what the a
 | 3 | `scrubbing_pii` | Presidio removes names, phones, emails, Aadhaar and PAN numbers from every free-text field (the **privacy wall**) | Removing personal identifiers |
 | 4 | `gathering_context` | History lookup **and** Tavily research, **in parallel**, both using the scrubbed English note | Checking patient history and latest drug information |
 | 5 | `checking_safety` | LLM pass 2 (AI safety review) plus the deterministic rule check, merged and sorted by severity | Cross-checking allergies and interactions |
-| 6 | `ready_for_review` | The draft waits for the doctor. **The app stops polling here.** | Draft ready for your review |
-| — | `saved` / `discarded` / `failed` | After Approve / Discard / an error | Saved to patient history / Draft discarded / Processing failed |
+| 6 | `saving` | The note is saved to the patient's record, marked `ai_scribe` | Saving to the patient record |
+| 7 | `updating_record` | LLM pass 3 proposes the note's long-term facts; the duplicate check keeps only the new ones, which are stored | Adding new information to the patient record |
+| 8 | `predicting` | LLM pass 4 plus the prediction rules read the whole history and list likely outcomes | Analysing patient history for likely outcomes |
+| 9 | `saved` | Done. **The app stops polling here** and shows the note, alerts, record update and predictions. | Saved to the patient record (AI scribe, awaiting your review) |
+| — | `verified` / `discarded` | After the doctor confirms (optionally with edits) / discards | Confirmed by the doctor / Discarded |
+| — | `ready_for_review` | Only if the automatic save failed: the draft waits for the doctor to retry | Not saved yet: review the draft and tap Save to retry |
+| — | `failed` | An error before the note existed | Processing failed |
 
 ### 3.3 What happens when something breaks
 
 | If this fails… | …the job | Why |
 |---|---|---|
-| Upload checks (type, size, patient) | Rejected at once with an HTTP error; no job is created | Bad input |
+| Upload checks (type, size, patient, **queue entry belongs to that patient**) | Rejected at once with an HTTP error; no job is created | Bad input, or a recording about to land on the wrong patient |
+| Reading today's queue during an upload | The upload is accepted without the queue check (the `patient_uuid` check still ran) | The recording is never lost to a queue outage |
 | Transcription, or no speech found | `failed`: `STT_FAILED` / `NO_SPEECH` | Nothing to work with |
 | Note writing (LLM pass 1) | `failed`: `NOTE_GENERATION_FAILED` | There is no note |
 | Privacy scrub | `failed`: `PRIVACY_SCRUB_FAILED`. **Nothing is returned, stored or sent** (tested). | Fail closed |
@@ -191,7 +211,11 @@ The `stage` value is what the app receives when polling. The label is what the a
 | Tavily | Continues. `checks.web_research="unavailable"` | Research is extra information, not the safety net |
 | AI review (LLM pass 2) | Continues with rule alerts only. `safety_check="partial"` | The rules still protect the key alerts |
 | Rule check | Continues. `checks.rules="unavailable"`, `safety_check="partial"` | — |
-| Saving on Approve | `503 SAVE_FAILED`; the draft is kept for a retry | The doctor's work is never lost |
+| Automatic save | Ends at `ready_for_review` with the note kept as a draft (60 min) and a top alert: *"could not be saved… tap Save to try again"*. Confirming it saves it. | Nothing is lost |
+| Record update | Continues. `checks.record_update="unavailable"`; the note itself is saved | New facts can be re-derived when the doctor confirms with edits |
+| Predictions: AI | Continues with rule predictions only. `checks.predictions="partial"` | The rules still give the key predictions |
+| Predictions: history | Continues. `checks.predictions="unavailable"`, no report | Never a guess without records |
+| Saving on confirm | `503 SAVE_FAILED`; nothing changes, retry | The doctor's work is never lost |
 
 ### 3.4 Where patient data goes
 
@@ -199,7 +223,9 @@ The `stage` value is what the app receives when polling. The label is what the a
 |---|---|---|
 | Audio recording | Flutter → ngrok → Kaggle **RAM** (`/dev/shm`) → STT | **No.** Deleted right after transcription, and on any failure (tested). |
 | Raw transcript (may contain names) | STT → LLM pass 1 (our GPU) → back to the doctor's screen only | **No.** It lives inside the job, which is forgotten after 60 minutes. |
-| Scrubbed note and alerts | History lookup, Tavily query builder, LLM pass 2, the doctor's screen | Only after the doctor taps **Approve** (saved by the RAG module) |
+| Scrubbed note and alerts | History lookup, Tavily query builder, LLM passes 2–4, the doctor's screen | **Yes, automatically**, by the RAG module, as `ai_scribe`; it becomes `doctor_notes` when the doctor confirms, and is deleted with its facts on Discard |
+| New facts from the note | The patient profile (RAG module) | Yes, scrubbed, with `source` and `origin_note_id`, so confirming or discarding the note updates exactly those facts |
+| Predictions | The doctor's screen | **No.** Memory only (per patient, until the record changes); never written back as records |
 | Tavily query | Tavily's servers (a third party) | Contains **only** `"<generic drug name> drug safety warnings interactions"` (tested) |
 | Logs | Kaggle notebook output (kept in saved versions) | IDs, stage names, timings and counts only (tested) |
 
@@ -217,12 +243,14 @@ backend/
 │   ├── errors.py            # ApiError / StageError + one error format
 │   ├── logging_setup.py     # event(): a logger that cannot print patient text
 │   ├── deps.py              # X-API-Key check, get_orch()
-│   ├── routes/              # health.py · consultations.py (+ jobs) · notes.py · patients.py (+ search)
+│   ├── routes/              # health.py · consultations.py (+ jobs) · notes.py · patients.py (+ today's queue, search)
 │   ├── orchestrator/
-│   │   ├── pipeline.py      # the Orchestrator: stages, failure rules, approve / discard / ask
+│   │   ├── pipeline.py      # the Orchestrator: stages, failure rules, confirm / discard / ask / predictions
 │   │   ├── jobs.py          # Job, Draft, JobManager (GPU slot, queue, expiry)
 │   │   ├── intake.py        # upload validation, RAM scratch folder
 │   │   ├── safety_rules.py  # deterministic safety check + merge_alerts()
+│   │   ├── record_update.py # new facts vs already on record (duplicate check)
+│   │   ├── predictions.py   # prediction rules + the no-advice screen
 │   │   ├── research.py      # privacy-safe Tavily queries, cache, parallel fetch
 │   │   ├── gpu.py           # which GPU models are loaded (resident / swap)
 │   │   └── registry.py      # picks mock or real for every service
@@ -255,7 +283,8 @@ Every setting lives in `app/config.py` and can be set from the environment or a 
 | `MAX_UPLOAD_MB` | `25` | Upload limit (15 min at 32 kbps ≈ 3.6 MB) |
 | `MAX_CONCURRENT_JOBS` / `MAX_PENDING_JOBS` | `1` / `4` | GPU slots / queue limit before `429 BUSY` |
 | `JOB_TTL_MINUTES` | `60` | When jobs and drafts are forgotten |
-| `AUTO_APPROVE` | `false` | Tests only: save drafts without the doctor |
+| `PREDICTION_MAX_RECORDS` | `60` | How many of the newest history records the prediction step reads |
+| `CLINIC_UTC_OFFSET_MINUTES` | `330` (IST) | Which date "today's queue" is. Kaggle runs on UTC, so without this the queue would switch days at 05:30 IST. |
 | `MOCK_LATENCY_SCALE` | `1.0` | Mock delays: `0` in tests, `1` feels realistic |
 | `MOCK_DEFAULT_SCENARIO` | `penicillin` | Which scripted consultation the mocks return (see Step 4) |
 
@@ -285,7 +314,9 @@ from typing import Callable, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
-Source = Literal["clinic_db", "doctor_notes"]
+# clinic_db: the clinic's records. doctor_notes: written or confirmed by the doctor.
+# ai_scribe: saved automatically from a consultation and NOT yet reviewed by the doctor.
+Source = Literal["clinic_db", "doctor_notes", "ai_scribe"]
 
 # ---------------------------------------------------------------- speech-to-text
 
@@ -316,6 +347,7 @@ class Fact(BaseModel):
     source: Source
     recorded_on: date | None = None
     note: str | None = None              # short clinical detail
+    origin_note_id: str | None = None    # the consultation note this fact came from, if any
 
 
 class LabResult(BaseModel):
@@ -330,6 +362,18 @@ class PatientSummary(BaseModel):
     display_name: str                    # pseudonym shown in the patient picker
     age: int | None = None
     sex: Literal["M", "F", "O"] | None = None
+
+
+class Visit(BaseModel):
+    """One patient in today's clinic queue. The RAG module owns the queue; the doctor's
+    phone picks the patient from it before recording."""
+    visit_id: str
+    patient_uuid: uuid.UUID
+    display_name: str
+    age: int | None = None
+    sex: Literal["M", "F", "O"] | None = None
+    token: int                           # position in today's queue, 1 = first
+    status: Literal["waiting", "seen"] = "waiting"   # seen once a recording has been accepted
 
 
 class PatientProfile(BaseModel):
@@ -381,7 +425,7 @@ class ClinicalNote(BaseModel):
     chief_complaint: str | None = None
     symptoms: list[Symptom] = []
     relevant_history: list[str] = []     # history mentioned in THIS consultation
-    allergies_mentioned: list[str] = []  # stored as doctor_notes facts once approved
+    allergies_mentioned: list[str] = []  # become profile facts through the record update
     prescriptions: list[Prescription] = []
     action_items: list[ActionItem] = []
     doctor_assessment: str | None = None  # only if the doctor said it; the AI never infers one
@@ -398,7 +442,7 @@ class NoteExtraction(BaseModel):
 
 
 class Evidence(BaseModel):
-    source: Literal["clinic_db", "doctor_notes", "transcript", "rule_table", "web"]
+    source: Literal["clinic_db", "doctor_notes", "ai_scribe", "transcript", "rule_table", "web"]
     snippet: str
     recorded_on: date | None = None
     url: str | None = None
@@ -432,15 +476,66 @@ class DrugResearch(BaseModel):
     hits: list[ResearchHit] = []
 
 
+# ---------------------------------------------------------------- patient record updates
+
+
+FactCategory = Literal["allergy", "medication", "condition"]
+
+
+class RecordChange(BaseModel):
+    category: FactCategory
+    value: str                           # "Atorvastatin 10 mg once daily", "High cholesterol"
+    note: str | None = None
+
+
+class RecordUpdate(BaseModel):
+    """What one consultation adds to the long-term record, and what it repeats."""
+    added: list[RecordChange] = []
+    already_on_record: list[RecordChange] = []   # redundant: ignored, not stored again
+
+
+class NoteFacts(BaseModel):
+    """The facts one consultation note contributes to the patient profile."""
+    allergies: list[Fact] = []
+    active_medications: list[Fact] = []
+    conditions: list[Fact] = []
+
+
+# ---------------------------------------------------------------- outcome predictions
+
+
+class Prediction(BaseModel):
+    outcome: str                         # a possible future development, never advice
+    likelihood: Literal["low", "moderate", "high"]
+    timeframe: str | None = None         # "next test", "coming months"
+    reasoning: str                       # why, from the stored records
+    evidence: list[Evidence] = []        # every prediction cites at least one record
+    origin: Literal["llm", "rule_engine"]
+
+
+class PredictionReport(BaseModel):
+    """Likely outcomes for one patient. Kept in memory only: never stored as a record."""
+    patient_uuid: uuid.UUID
+    generated_at: datetime
+    predictions: list[Prediction] = []
+    records_analysed: int
+    withheld: int = 0                    # AI predictions dropped for giving advice or citing nothing
+    model: str
+    disclaimer: str
+
+
 # ---------------------------------------------------------------- storage & search
 
 
 class NoteMeta(BaseModel):
     note_id: str
     job_id: str
+    visit_id: str | None = None          # today's queue entry the recording was made for (None: walk-in)
     visit_at: datetime
-    approved_at: datetime
-    edited_by_doctor: bool
+    saved_at: datetime
+    source: Literal["ai_scribe", "doctor_notes"]   # ai_scribe until the doctor confirms it
+    verified_at: datetime | None = None
+    edited_by_doctor: bool = False
     acknowledged_alert_ids: list[str] = []
     stt_engine: str
     llm_model: str
@@ -449,9 +544,11 @@ class NoteMeta(BaseModel):
 class SavedNote(BaseModel):
     note_id: str
     patient_uuid: uuid.UUID
+    visit_id: str | None = None
     visit_at: datetime
     note: ClinicalNote
     alerts: list[SafetyAlert] = []
+    source: Literal["ai_scribe", "doctor_notes"] = "ai_scribe"
 
 
 class SimilarCase(BaseModel):
@@ -489,10 +586,17 @@ class RAGService(Protocol):
     def load(self) -> None: ...
     def unload(self) -> None: ...
     def list_patients(self) -> list[PatientSummary]: ...
+    def list_visits(self, day: date) -> list[Visit]: ...         # that day's clinic queue, token order
+    def mark_visit_seen(self, visit_id: str) -> bool: ...        # False for an unknown visit_id
     def get_profile(self, patient_uuid: uuid.UUID) -> PatientProfile | None: ...
     def retrieve(self, patient_uuid: uuid.UUID, query: str, top_k: int = 8) -> list[ContextChunk]: ...
+    def get_history(self, patient_uuid: uuid.UUID) -> list[ContextChunk]: ...   # every record, newest first
     def save_note(self, patient_uuid: uuid.UUID, note: ClinicalNote,
                   alerts: list[SafetyAlert], meta: NoteMeta) -> str: ...
+    # save_note is an upsert: saving meta.note_id again replaces that note (doctor confirmation/edits).
+    def set_note_facts(self, patient_uuid: uuid.UUID, note_id: str, facts: NoteFacts) -> int: ...
+    # Replaces every fact that came from note_id with `facts` (origin_note_id = note_id).
+    def delete_note(self, patient_uuid: uuid.UUID, note_id: str) -> int: ...     # the note + its facts
     def list_notes(self, patient_uuid: uuid.UUID) -> list[SavedNote]: ...
     def search_similar(self, query: str, top_k: int = 5) -> list[SimilarCase]: ...
     def delete_patient(self, patient_uuid: uuid.UUID) -> int: ...
@@ -506,6 +610,10 @@ class LLMService(Protocol):
     def extract_note(self, transcript: Transcript) -> NoteExtraction: ...
     def review_safety(self, note: ClinicalNote, context: PatientContext,
                       research: list[DrugResearch]) -> list[SafetyAlert]: ...
+    def propose_record_updates(self, note: ClinicalNote, profile: PatientProfile) -> RecordUpdate: ...
+    # Facts from the note that belong in the long-term record, split into new / already on record.
+    def predict_outcomes(self, profile: PatientProfile, history: list[ContextChunk],
+                         already_identified: list[Prediction]) -> list[Prediction]: ...
     def answer_question(self, question: str, context: PatientContext) -> QAAnswer: ...
 
 
@@ -530,7 +638,12 @@ class ResearchService(Protocol):
 
 - `Fact.source` and `Fact.recorded_on` make the RAG doc's **precedence rule** possible: *"Based on your recent notes, patient is allergic to Penicillin, overriding older clinic data."*
 - `ClinicalNote` deliberately has **no diagnosis field**, matching the "analytical assistant, not a digital doctor" rule in `centralbrain.md`. `doctor_assessment` is only filled when the doctor says it out loud.
-- `allergies_mentioned` closes the memory loop: an allergy mentioned today becomes a `doctor_notes` fact in the profile once the note is approved (tested).
+- `Source = "ai_scribe"` marks anything saved automatically and not yet reviewed. The rule check still uses those facts for alerts (a new allergy must never be missed), but only `doctor_notes` get the "newer doctor note takes precedence" treatment (tested).
+- `Visit` is one row of **today's clinic queue**, kept by the RAG module. The doctor's phone lists it and sends the chosen `visit_id` with the recording next to `patient_uuid`; the orchestrator refuses the upload if the two disagree, so a recording can only land on the patient the doctor picked. `NoteMeta.visit_id` / `SavedNote.visit_id` record which queue entry a note came from (`None` for a walk-in).
+- `Fact.origin_note_id` ties each fact to the consultation note it came from, so confirming, correcting or discarding that note updates exactly those facts (`RAGService.set_note_facts` / `delete_note`).
+- `allergies_mentioned` closes the memory loop: an allergy mentioned today becomes a fact in the profile through the record update, `ai_scribe` at first and `doctor_notes` once confirmed (tested).
+- `RecordUpdate` shows the doctor what was added to the record and what was ignored as already recorded.
+- `PredictionReport` is never passed to `save_note`: predictions live in memory only, so later predictions are never built on earlier guesses.
 - `DrugResearch.query` records exactly what was sent to Tavily, so the privacy claim can be shown on screen.
 
 ### 4.1 What a finished job looks like
@@ -539,19 +652,20 @@ This is a real response from the tested prototype (Ravi's consultation, all serv
 
 ```json
 {
-  "job_id": "9370a46d691e4cc981a0e8ce27f0ac66",
+  "job_id": "cec44fe6124f490bb205e269b71c7cb2",
   "patient_uuid": "cb2759d8-3d91-4a4d-8bd2-026f68f76426",
-  "stage": "ready_for_review",
-  "stage_label": "Draft ready for your review",
+  "visit_id": "20260925-01",
+  "stage": "saved",
+  "stage_label": "Saved to the patient record (AI scribe, awaiting your review)",
   "progress": null,
   "queue_position": null,
-  "created_at": "2026-09-24T18:47:07.415434Z",
-  "updated_at": "2026-09-24T18:47:07.745925Z",
-  "timings_ms": {"stt": 102, "llm_extract": 150, "scrub": 0, "history": 21, "web_research": 25,
-                 "gathering_context": 25, "llm_review": 50},
+  "created_at": "2026-09-25T07:58:06.382607Z",
+  "updated_at": "2026-09-25T07:58:06.875221Z",
+  "timings_ms": {"stt": 103, "llm_extract": 150, "scrub": 3, "history": 21, "web_research": 26,
+                 "gathering_context": 26, "llm_review": 50, "save": 10, "record_update": 67, "predictions": 78},
   "result": {
-    "note_id": "ab01074c729b4dc09fdf3c2014c4a3d3",
-    "status": "draft",
+    "note_id": "2277d64bfe33439299d47a048256ae53",
+    "status": "saved",
     "note": {
       "chief_complaint": "Headache and fever for 3 days",
       "symptoms": [{"name": "Headache", "duration": "3 days", "severity": "severe", "notes": null}, "…"],
@@ -567,7 +681,7 @@ This is a real response from the tested prototype (Ravi's consultation, all serv
     },
     "alerts": [
       {
-        "alert_id": "292a14ba",
+        "alert_id": "e6d28ebb",
         "category": "allergy_conflict",
         "severity": "critical",
         "message": "Amoxicillin (a penicillin-class drug) was prescribed. Patient record lists a Penicillin allergy (doctor note, 10 Sep 2026).",
@@ -576,7 +690,7 @@ This is a real response from the tested prototype (Ravi's consultation, all serv
         "drug": "amoxicillin"
       },
       {
-        "alert_id": "09ef6c95",
+        "alert_id": "fbc007c5",
         "category": "history_contradiction",
         "severity": "info",
         "message": "Clinic record (02 Mar 2024) lists no known drug allergies, but your note from 10 Sep 2026 records a Penicillin allergy. The more recent doctor note takes precedence.",
@@ -585,7 +699,8 @@ This is a real response from the tested prototype (Ravi's consultation, all serv
         "drug": null
       }
     ],
-    "checks": {"history": "ok", "web_research": "ok", "ai_review": "ok", "rules": "ok", "safety_check": "complete"},
+    "checks": {"history": "ok", "web_research": "ok", "ai_review": "ok", "rules": "ok",
+               "record_update": "ok", "predictions": "ok", "safety_check": "complete"},
     "research": [
       {"drug": "amoxicillin", "query": "amoxicillin drug safety warnings interactions",
        "hits": [{"title": "[MOCK] Amoxicillin: prescribing information summary", "url": "https://example.org/mock/amoxicillin", "domain": "example.org", "snippet": "…", "published_date": null}]},
@@ -602,9 +717,37 @@ This is a real response from the tested prototype (Ravi's consultation, all serv
     },
     "speaker_roles": {"SPEAKER_00": "doctor", "SPEAKER_01": "patient"},
     "models": {"stt": "mock:penicillin", "llm": "mock-llm"},
-    "disclaimer": "AI-generated draft for clinician review. It is not a diagnosis or a treatment recommendation; the doctor makes every clinical decision."
+    "record_update": {"added": [], "already_on_record": []},
+    "predictions": {
+      "patient_uuid": "cb2759d8-3d91-4a4d-8bd2-026f68f76426",
+      "generated_at": "2026-09-25T07:58:06.871667Z",
+      "predictions": [
+        {
+          "outcome": "An allergic reaction is likely on further exposure to penicillin and other penicillin-class drugs.",
+          "likelihood": "high",
+          "timeframe": "On any future exposure",
+          "reasoning": "The doctor note from 10 Sep 2026 records a Penicillin allergy: urticarial rash within an hour of a penicillin injection.",
+          "evidence": [{"source": "doctor_notes", "snippet": "Allergy: Penicillin - urticarial rash within an hour of a penicillin injection", "recorded_on": "2026-09-10", "url": null}],
+          "origin": "rule_engine"
+        }
+      ],
+      "records_analysed": 3,
+      "withheld": 0,
+      "model": "mock-llm+rules",
+      "disclaimer": "Likely outcomes estimated from the stored records to support the doctor's own assessment. They are not a diagnosis, advice or a treatment recommendation."
+    },
+    "disclaimer": "AI-generated note, saved automatically and awaiting clinician review. It is not a diagnosis or a treatment recommendation; the doctor makes every clinical decision."
   },
   "error": null
+}
+```
+
+Ravi's short courses (Amoxicillin for 5 days, Paracetamol if fever) are not long-term medications, so his `record_update` is empty. Arjun's consultation shows both halves (tested):
+
+```json
+"record_update": {
+  "added": [{"category": "medication", "value": "Atorvastatin 10 mg once daily at night", "note": null}],
+  "already_on_record": [{"category": "medication", "value": "Metformin 500 mg twice daily", "note": null}]
 }
 ```
 
@@ -620,13 +763,16 @@ All paths under `/api/v1` need the `X-API-Key` header when `API_KEY` is set. `/h
 |---|---|---|---|---|
 | P0 | `GET /health` | Liveness: the process is up. Instant; never touches models. | 200 | — |
 | P0 | `GET /ready` | Readiness: which backends are live, whether models are loaded, pending jobs, GPU memory | 200 / 503 | — |
-| P0 | `GET /api/v1/patients` | Patient picker (`PatientSummary[]`) | 200 | 503 |
-| P0 | `POST /api/v1/consultations` | Multipart form: `audio_file` (file), `patient_uuid`, `language_hint` = `auto`\|`kn`\|`en` (default `auto`) | **202** `{job_id, stage, queue_position, status_url}` | 400, 401, 404, 413, 415, 422, 429 |
-| P0 | `GET /api/v1/jobs/{job_id}` | Poll progress and result (`JobStatus`, §4.1) | 200 | 404 |
-| P0 | `POST /api/v1/notes/{note_id}/approve` | **The only way a note is saved.** Optional body `{"note": ClinicalNote, "acknowledged_alert_ids": [...]}` carries the doctor's edits, which are scrubbed again. | 200 `{note_id, status: "saved", saved_at}` | 404, 409, 503 |
-| P1 | `GET /api/v1/patients/{uuid}` | Profile: allergies, medications, conditions and labs, each with source and date | 200 | 404, 503 |
-| P1 | `GET /api/v1/patients/{uuid}/notes` | Approved notes, for the "long-term memory" demo | 200 | 503 |
-| P1 | `POST /api/v1/notes/{note_id}/discard` | Throw the draft away | 200 | 404, 409 |
+| P0 | `GET /api/v1/visits/today` | **Today's clinic queue** for the doctor's phone (`QueueEntry[]`, token order): `visit_id`, `patient_uuid`, `display_name`, `age`, `sex`, `token`, `status` (`waiting`/`seen`), plus `job_id`, `job_stage`, `job_stage_label` of the newest recording for that entry (while it's in memory). "Today" is the clinic's date (`CLINIC_UTC_OFFSET_MINUTES`, IST by default). | 200 | 503 |
+| P0 | `GET /api/v1/patients` | Every patient (`PatientSummary[]`). `?q=<text>` filters by name: the phone's search for walk-ins who are not in today's queue. | 200 | 422, 503 |
+| P0 | `POST /api/v1/consultations` | Multipart form: `audio_file` (file), `patient_uuid`, `visit_id` (optional: the queue entry the doctor picked; omit for a walk-in), `language_hint` = `auto`\|`kn`\|`en` (default `auto`). With `visit_id`, the entry must be in today's queue **and belong to `patient_uuid`**, and is then marked `seen`. | **202** `{job_id, stage, queue_position, status_url, patient_uuid, display_name, visit_id}`: the patient the server attached the recording to | 400, 401, 404, 409, 413, 415, 422, 429 |
+| P0 | `GET /api/v1/jobs/{job_id}` | Poll progress and result (`JobStatus`, §4.1), including the record update and predictions | 200 | 404 |
+| P0 | `GET /api/v1/jobs?patient_uuid=<uuid>` | That patient's recordings still in memory (`JobStatus[]`, newest first): how the doctor's website finds what the phone uploaded | 200 | 422 |
+| P0 | `POST /api/v1/notes/{note_id}/approve` | **The doctor confirms the automatically saved note.** Optional body `{"note": ClinicalNote, "acknowledged_alert_ids": [...]}` carries the doctor's edits, which are scrubbed again and replace the AI version; the record update and predictions are then redone in the background. Without edits, the note's facts simply become `doctor_notes`. Also the retry when the automatic save failed. | 200 `{note_id, status: "verified", verified_at}` | 404, 409, 503 |
+| P0 | `GET /api/v1/patients/{uuid}/predictions` | Likely outcomes from the patient's whole history (`PredictionReport`): likelihood, timeframe, reasoning and evidence for each, never advice. Cached until the record changes; `?refresh=true` regenerates. Generated on demand if there is none yet. | 200 | 404, 503 |
+| P1 | `GET /api/v1/patients/{uuid}` | Profile: allergies, medications, conditions and labs, each with source and date (and `origin_note_id` for facts added by a consultation) | 200 | 404, 503 |
+| P1 | `GET /api/v1/patients/{uuid}/notes` | Saved notes, newest first; `source` is `ai_scribe` until the doctor confirms, then `doctor_notes` | 200 | 503 |
+| P1 | `POST /api/v1/notes/{note_id}/discard` | Discard the note: an automatically saved note is removed from the record together with the facts it added | 200 | 404, 409, 503 |
 | P1 | `POST /api/v1/search/similar` | Global similarity search, body `{"query": "...", "top_k": 5}` | 200 `SimilarCase[]` | 422, 503 |
 | P2 | `POST /api/v1/patients/{uuid}/ask` | Doctor Q&A over the records, body `{"question": "..."}`. Opinion or diagnosis questions get the exact refusal sentence from `centralbrain.md`, without calling the LLM. | 200 `QAAnswer` | 404, 503 |
 | P2 | `DELETE /api/v1/patients/{uuid}` | Cascading deletion demo: purge stored records and in-memory copies | 200 `{patient_uuid, deleted_records}` | 503 |
@@ -648,8 +794,10 @@ Every error, from any endpoint, looks like this (a real response):
 | `EMPTY_AUDIO` | 400 | The file is empty |
 | `AUDIO_TOO_LARGE` | 413 | Over `MAX_UPLOAD_MB` |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | Not audio |
-| `PATIENT_NOT_FOUND` / `JOB_NOT_FOUND` / `NOTE_NOT_FOUND` | 404 | Unknown or expired ID (jobs and drafts expire after 60 min) |
-| `NOTE_NOT_A_DRAFT` | 409 | Already saved or discarded (double taps are safe) |
+| `PATIENT_NOT_FOUND` / `JOB_NOT_FOUND` / `NOTE_NOT_FOUND` | 404 | Unknown or expired ID (jobs, and the ability to confirm or discard a note, expire after 60 min; the saved note itself stays in the record) |
+| `VISIT_NOT_FOUND` | 404 | The `visit_id` is not in today's queue (refresh the queue) |
+| `VISIT_PATIENT_MISMATCH` | 409 | The `visit_id` belongs to a different patient than `patient_uuid`. Nothing was stored. |
+| `NOTE_ALREADY_FINAL` | 409 | Already confirmed or discarded (double taps are safe) |
 | `BUSY` | 429 | Queue full: try again shortly |
 | `SAVE_FAILED` / `HISTORY_UNAVAILABLE` / `ASSISTANT_UNAVAILABLE` / `PRIVACY_SCRUB_FAILED` | 503 | A dependency is down; nothing was lost |
 | `INTERNAL_ERROR` | 500 | A bug. Only the exception type is logged, never its message. |
@@ -658,11 +806,17 @@ Failures that happen *inside* a job are not HTTP errors. `GET /jobs/{id}` return
 
 ### 5.3 Rules for the Flutter app
 
+The **doctor's phone** only picks the patient and records. Everything the doctor reviews (note, alerts, record update, predictions, confirm/discard) is on the **doctor's website**.
+
 1. Send `ngrok-skip-browser-warning: 1` on **every** request. Without it, Flutter Web gets ngrok's HTML warning page instead of JSON. Also send `X-API-Key` if one is set.
-2. After `202`, poll `GET /api/v1/jobs/{job_id}` **every 2 seconds**. Stop at `ready_for_review`, `saved`, `discarded` or `failed`. Give up after 15 minutes.
-3. Show `stage_label`. Show `progress` (0–1) as a bar when it isn't null, and `queue_position` when queued.
-4. Alerts arrive already sorted (critical → info). Show each alert's evidence and origin. Show the `checks` chips and the `disclaimer`.
-5. A `404` on an old job means it expired, so start again. A `429` means busy, so retry in a few seconds.
+2. **Phone:** list `GET /visits/today`; search `GET /patients?q=` for walk-ins. Send the picked patient's `patient_uuid` **and** `visit_id` (walk-ins: `patient_uuid` only), and never let the selection change while recording. Show "Uploaded for `display_name`" from the **202 response** (the server's view, not the app's). Then go back to the queue, which shows each row's `job_stage_label`. On `409 VISIT_PATIENT_MISMATCH` or `404 VISIT_NOT_FOUND`, refresh the queue and ask the doctor to pick again.
+3. **Website:** open a recording from `GET /visits/today` (its `job_id`) or `GET /jobs?patient_uuid=`. Then poll `GET /api/v1/jobs/{job_id}` as below.
+4. After `202`, poll `GET /api/v1/jobs/{job_id}` **every 2 seconds**. Stop at `saved`, `verified`, `ready_for_review`, `discarded` or `failed`. Give up after 15 minutes.
+5. Show `stage_label`. Show `progress` (0–1) as a bar when it isn't null, and `queue_position` when queued.
+6. Alerts arrive already sorted (critical → info). Show each alert's evidence and origin. Show the `checks` chips and the `disclaimer`.
+7. Label an `ai_scribe` note "AI scribe, awaiting your review" until the doctor confirms it. Show `record_update` as "Added to record" and "Already on record (ignored)".
+8. Show `predictions` as a separate "Likely outcomes" panel: likelihood, timeframe, reasoning and cited evidence for each, the origin ("Rule check" / "AI"), and the report's `disclaimer`. Never present them as advice or a diagnosis.
+9. A `404` on an old job means it expired, so start again. A `429` means busy, so retry in a few seconds.
 
 ---
 
@@ -697,6 +851,7 @@ Every step has the same shape: **Goal** (plain language) → **Files** → **Do 
 
 ```python
 """All runtime settings. Values come from environment variables or a .env file."""
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -734,7 +889,8 @@ class Settings(BaseSettings):
     audio_scratch_dir: Path | None = None  # None -> /dev/shm/clinical-scribe, else OS temp dir
 
     # Behaviour
-    auto_approve: bool = False            # tests only: save drafts without doctor approval
+    prediction_max_records: int = 60      # newest history records the prediction step reads
+    clinic_utc_offset_minutes: int = 330  # IST; decides which day "today's queue" is (Kaggle runs on UTC)
     mock_latency_scale: float = 1.0       # 0 in tests; 1 = realistic mock delays
     mock_default_scenario: str = "penicillin"
     samples_dir: Path = Path(__file__).resolve().parent.parent / "samples" / "audio"
@@ -756,6 +912,10 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
+
+    def clinic_today(self) -> date:
+        """The clinic's date. A fixed offset, not zoneinfo: Windows has no tz database without tzdata."""
+        return datetime.now(timezone(timedelta(minutes=self.clinic_utc_offset_minutes))).date()
 
 
 @lru_cache
@@ -782,7 +942,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
-from app.contracts import ClinicalNote, DrugResearch, SafetyAlert, Transcript
+from app.contracts import ClinicalNote, DrugResearch, PredictionReport, RecordUpdate, SafetyAlert, Transcript, Visit
 
 
 class Stage(str, Enum):
@@ -792,8 +952,12 @@ class Stage(str, Enum):
     scrubbing_pii = "scrubbing_pii"
     gathering_context = "gathering_context"
     checking_safety = "checking_safety"
-    ready_for_review = "ready_for_review"
-    saved = "saved"
+    saving = "saving"
+    updating_record = "updating_record"
+    predicting = "predicting"
+    ready_for_review = "ready_for_review"   # only when the automatic save failed: a draft waits for a retry
+    saved = "saved"                         # saved automatically as an AI scribe note
+    verified = "verified"                   # the doctor confirmed (and maybe edited) the note
     discarded = "discarded"
     failed = "failed"
 
@@ -805,16 +969,20 @@ STAGE_LABELS = {
     Stage.scrubbing_pii: "Removing personal identifiers",
     Stage.gathering_context: "Checking patient history and latest drug information",
     Stage.checking_safety: "Cross-checking allergies and interactions",
-    Stage.ready_for_review: "Draft ready for your review",
-    Stage.saved: "Saved to patient history",
-    Stage.discarded: "Draft discarded",
+    Stage.saving: "Saving to the patient record",
+    Stage.updating_record: "Adding new information to the patient record",
+    Stage.predicting: "Analysing patient history for likely outcomes",
+    Stage.ready_for_review: "Not saved yet: review the draft and tap Save to retry",
+    Stage.saved: "Saved to the patient record (AI scribe, awaiting your review)",
+    Stage.verified: "Confirmed by the doctor",
+    Stage.discarded: "Discarded",
     Stage.failed: "Processing failed",
 }
 
 # The frontend stops polling once a job reaches one of these.
-FINISHED = {Stage.ready_for_review, Stage.saved, Stage.discarded, Stage.failed}
+FINISHED = {Stage.ready_for_review, Stage.saved, Stage.verified, Stage.discarded, Stage.failed}
 
-CheckStatus = Literal["ok", "unavailable", "skipped"]
+CheckStatus = Literal["ok", "partial", "unavailable", "skipped"]
 
 
 class Checks(BaseModel):
@@ -822,6 +990,8 @@ class Checks(BaseModel):
     web_research: CheckStatus = "skipped"   # Tavily results fetched?
     ai_review: CheckStatus = "skipped"      # LLM safety review ran?
     rules: CheckStatus = "skipped"          # deterministic rule check ran?
+    record_update: CheckStatus = "skipped"  # new facts added to the patient record?
+    predictions: CheckStatus = "skipped"    # ok = AI + rules, partial = rules only
 
     @computed_field
     @property
@@ -835,7 +1005,7 @@ class Checks(BaseModel):
 
 class ConsultationResult(BaseModel):
     note_id: str
-    status: Literal["draft", "saved", "discarded"]
+    status: Literal["draft", "saved", "verified", "discarded"]
     note: ClinicalNote
     alerts: list[SafetyAlert]
     checks: Checks
@@ -844,6 +1014,8 @@ class ConsultationResult(BaseModel):
     transcript: Transcript                  # returned to the doctor only; never stored
     speaker_roles: dict[str, str]
     models: dict[str, str]
+    record_update: RecordUpdate | None = None      # what was added to the record, what was redundant
+    predictions: PredictionReport | None = None    # likely outcomes from the whole history
     disclaimer: str
 
 
@@ -856,6 +1028,7 @@ class ErrorInfo(BaseModel):
 class JobStatus(BaseModel):
     job_id: str
     patient_uuid: uuid.UUID
+    visit_id: str | None = None
     stage: Stage
     stage_label: str
     progress: float | None = None           # 0..1 while transcribing, when the STT reports it
@@ -872,17 +1045,28 @@ class ConsultationAccepted(BaseModel):
     stage: Stage
     queue_position: int
     status_url: str
+    # Who the server attached the recording to; the phone shows "Uploaded for <display_name>".
+    patient_uuid: uuid.UUID
+    display_name: str | None = None         # None only when the patient registry was down
+    visit_id: str | None = None
+
+
+class QueueEntry(Visit):
+    """One row of today's queue, with the newest recording made for it (while still in memory)."""
+    job_id: str | None = None
+    job_stage: Stage | None = None
+    job_stage_label: str | None = None
 
 
 class ApproveRequest(BaseModel):
-    note: ClinicalNote | None = None        # the doctor's edited note; omit to approve as-is
+    note: ClinicalNote | None = None        # the doctor's edited note; omit to confirm as-is
     acknowledged_alert_ids: list[str] = []
 
 
 class ApproveResponse(BaseModel):
     note_id: str
-    status: Literal["saved"]
-    saved_at: datetime
+    status: Literal["verified"]
+    verified_at: datetime
 
 
 class SimilarSearchRequest(BaseModel):
@@ -929,7 +1113,7 @@ import logging
 log = logging.getLogger("scribe")
 
 _ALLOWED_KEYS = {"job", "stage", "ms", "code", "status", "count", "backend",
-                 "queue", "patient", "note", "drugs", "hits", "policy", "path_kind"}
+                 "queue", "patient", "note", "drugs", "hits", "policy", "path_kind", "visit"}
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -962,7 +1146,7 @@ def event(name: str, **fields) -> None:
 - `app/orchestrator/registry.py`.
 - `app/services/real/stt_adapter.py` and `rag_adapter.py` as stubs.
 
-**4a. Three synthetic patients** (`demo_patients.json`). Each patient has display name, first names, age, sex, scenario, allergies, active medications, conditions, labs (as `Fact` / `LabResult` fields) and free-text `history` entries with `source` and `recorded_on`. The first patient in full:
+**4a. Three synthetic patients** (`demo_patients.json`). Each patient has display name, first names, age, sex, scenario, `queue_token` (their place in the demo's "today's queue": Ravi 1, Lakshmi 2, Arjun 3), allergies, active medications, conditions, labs (as `Fact` / `LabResult` fields) and free-text `history` entries with `source` and `recorded_on`. The first patient in full:
 
 ```json
 {
@@ -972,6 +1156,7 @@ def event(name: str, **fields) -> None:
   "age": 54,
   "sex": "M",
   "scenario": "penicillin",
+  "queue_token": 1,
   "allergies": [
     {"value": "No known drug allergies", "source": "clinic_db", "recorded_on": "2024-03-02"},
     {"value": "Penicillin", "source": "doctor_notes", "recorded_on": "2026-09-10",
@@ -1010,7 +1195,7 @@ def event(name: str, **fields) -> None:
 The note for this scenario has chief complaint "Headache and fever for 3 days", prescriptions Amoxicillin and Paracetamol, and a summary that starts with "Ravi reports…", so the privacy step visibly removes one name.
 
 - **Lakshmi** (`warfarin`): knee pain for two weeks, "BP maatre thagothini, adu bittu bere enu illa" (I take BP tablets, nothing else), then "Brufen 400 bareetini, dinakke eradu sala oota aadmele".
-- **Arjun** (`diabetes`): tiredness and thirst, "continue Metformin 500 twice daily … one month nalli follow-up", with no HbA1c ordered.
+- **Arjun** (`diabetes`): tiredness and thirst; he mentions that a health camp found high cholesterol and started "Atorvastatin 10 … raatri" (at night); "continue Metformin 500 twice daily, Atorvastatin 10 raatri continue maadi … one month nalli follow-up", with no HbA1c ordered. This shows the record update: Metformin is already on record (ignored), Atorvastatin is new (added).
 
 **4c. Mocks: they block, like the real thing.** This is the most important rule in the step. The mocks use `time.sleep` inside plain functions, **not** `asyncio.sleep`. The real WhisperX, LLM and Presidio calls block too, so if the mocks didn't, the async bugs would only appear on merge day. Every sleep is multiplied by `MOCK_LATENCY_SCALE`. The mock STT:
 
@@ -1075,8 +1260,8 @@ The other mocks, described (each has `name`, `load()`, `unload()`, and blocking 
 
 | Mock | Behaviour |
 |---|---|
-| `MockLLM` (`uses_gpu = True`) | `extract_note`: sleep 3 s, read the scenario from `transcript.engine` (`"mock:<scenario>"`, falling back to the default), return that scenario's note and `speaker_roles` as a `NoteExtraction(model="mock-llm")`. `review_safety`: sleep 1 s, return `[]`, so on mocks the alerts come from the real rule check. `answer_question`: return the top history chunk prefixed with `[MOCK]`, with a citation. |
-| `MockRAG` | Loads `demo_patients.json`, and keeps approved notes in memory. `get_profile` builds `Fact`s and `LabResult`s, and **adds every approved note's `allergies_mentioned` as a `doctor_notes` fact** (the memory loop). `retrieve` and `search_similar` rank by keyword overlap (`|q∩d| / √(|q|·|d|)`), newest first on ties. `delete_patient` removes the patient and their notes and returns the count. |
+| `MockLLM` (`uses_gpu = True`) | `extract_note`: sleep 3 s, read the scenario from `transcript.engine` (`"mock:<scenario>"`, falling back to the default), return that scenario's note and `speaker_roles` as a `NoteExtraction(model="mock-llm")`. `review_safety`: sleep 1 s, return `[]`, so on mocks the alerts come from the real rule check. `propose_record_updates`: sleep 1 s, return every `allergies_mentioned` as an allergy and every ongoing prescription (no fixed `duration`, not as-needed) as a medication, all under `added`; the orchestrator's duplicate check decides what is really new. `predict_outcomes`: sleep 1 s, return `[]`, so on mocks the predictions come from the real prediction rules. `answer_question`: return the top history chunk prefixed with `[MOCK]`, with a citation. |
+| `MockRAG` | Loads `demo_patients.json`, and keeps saved notes (upserted by `note_id`, with their `source`) and the facts each note added (`set_note_facts`, tagged with `origin_note_id`) in memory. `get_profile` builds `Fact`s and `LabResult`s from the fixture plus every note's facts. `get_history` returns every record newest first. `retrieve` and `search_similar` rank by keyword overlap (`|q∩d| / √(|q|·|d|)`), newest first on ties. `delete_note` removes a note and its facts; `delete_patient` removes the patient, notes, facts and queue entries and returns the count. `list_visits(day)` builds that day's queue on first request from the patients with a `queue_token` (visit IDs like `20260925-01`), so the demo always has a queue whatever the date; `mark_visit_seen` flips an entry to `seen`. `save_note` keeps `meta.visit_id` on the saved note. |
 | `MockPrivacy` | Replaces the demo first names, plus any `deny_terms`, with `<PERSON>` (case-insensitive, whole words), skips anything in `allow_terms`, and returns `{"PERSON": n}`. |
 | `MockResearch` | Returns one hit per query, titled `[MOCK] <Drug>: prescribing information summary` with an `https://example.org/mock/<drug>` URL. It can never be mistaken for real data. |
 
@@ -1245,6 +1430,7 @@ class Job:
     patient_uuid: uuid.UUID
     language_hint: str | None
     audio_path: Path | None
+    visit_id: str | None = None                            # today's queue entry; None for a walk-in
     name_terms: list[str] = field(default_factory=list)    # patient's names, for the scrubber only
     created_at: datetime = field(default_factory=utcnow)
     updated_at: datetime = field(default_factory=utcnow)
@@ -1264,6 +1450,8 @@ class Job:
 
 @dataclass
 class Draft:
+    """A consultation note the doctor can still confirm, correct or discard (for JOB_TTL_MINUTES).
+    status: draft (automatic save failed) -> saved (AI scribe) -> verified (doctor) | discarded."""
     note_id: str
     job_id: str
     patient_uuid: uuid.UUID
@@ -1271,10 +1459,12 @@ class Draft:
     alerts: list[SafetyAlert]
     stt_engine: str
     llm_model: str
+    visit_at: datetime
+    visit_id: str | None = None
     name_terms: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=utcnow)
-    status: Literal["draft", "saved", "discarded"] = "draft"
-    saved_at: datetime | None = None
+    status: Literal["draft", "saved", "verified", "discarded"] = "draft"
+    verified_at: datetime | None = None
 
 
 class JobManager:
@@ -1290,6 +1480,19 @@ class JobManager:
 
     def pending(self) -> list[Job]:
         return [j for j in self.jobs.values() if j.stage not in FINISHED]
+
+    def for_patient(self, patient_uuid: uuid.UUID) -> list[Job]:
+        """That patient's jobs still in memory, newest first (the website finds the phone's recordings)."""
+        return sorted((j for j in self.jobs.values() if j.patient_uuid == patient_uuid),
+                      key=lambda j: j.created_at, reverse=True)
+
+    def latest_for_visits(self) -> dict[str, Job]:
+        """visit_id -> the newest job recorded for that queue entry."""
+        latest: dict[str, Job] = {}
+        for j in self.jobs.values():
+            if j.visit_id and (j.visit_id not in latest or j.created_at > latest[j.visit_id].created_at):
+                latest[j.visit_id] = j
+        return latest
 
     def queue_position(self, job: Job) -> int:
         if job.stage is not Stage.queued:
@@ -1309,7 +1512,7 @@ class JobManager:
 ```
 
 **Also in this file (write as described):**
-- `status(job) -> JobStatus`: builds the polling response. It includes `stage_label` from `STAGE_LABELS`, and `queue_position` only while queued.
+- `status(job) -> JobStatus`: builds the polling response. It includes `visit_id`, `stage_label` from `STAGE_LABELS`, and `queue_position` only while queued.
 - `sweep()`: deletes finished jobs whose `updated_at`, and drafts whose `created_at`, is older than `JOB_TTL_MINUTES`.
 - `sweep_forever(every_s=60)`: an infinite `sleep` + `sweep` loop.
 - `shutdown()`: cancels every task in `_tasks` and gathers them with `return_exceptions=True`.
@@ -1464,7 +1667,7 @@ The rest of `DrugRules` (write as described):
 
 | Name | Behaviour |
 |---|---|
-| module constants | `_DOSE_WORDS` (mg, mcg, g, ml, tab(s), tablet(s), cap(s), capsule(s), syrup, inj, injection, od, bd, tds, sos, hs); `_SEVERITY_ORDER` (`critical` 0, `warning` 1, `info` 2); `_SOURCE_LABEL` (`clinic_db` → "clinic record", `doctor_notes` → "doctor note"); `_CLASS_LABEL` (for example `nsaid` → "an NSAID", `penicillin` → "a penicillin-class drug") |
+| module constants | `_DOSE_WORDS` (mg, mcg, g, ml, tab(s), tablet(s), cap(s), capsule(s), syrup, inj, injection, od, bd, tds, sos, hs); `_SEVERITY_ORDER` (`critical` 0, `warning` 1, `info` 2); `_SOURCE_LABEL` (`clinic_db` → "clinic record", `doctor_notes` → "doctor note", `ai_scribe` → "AI scribe note, not yet reviewed"); `_CLASS_LABEL` (for example `nsaid` → "an NSAID", `penicillin` → "a penicillin-class drug") |
 | `_fmt(date)` | `"10 Sep 2026"` |
 | `load()` | Reads the JSON. `known` = `other_known` ∪ every class member. |
 | `classes_of(generic)` | The classes containing that generic |
@@ -1605,7 +1808,7 @@ class TavilyResearch:
 
 ### Step 10 — The pipeline (the heart of the orchestrator)
 
-**Goal:** run one consultation through every stage in the right order, time each stage, apply the failure rules from §3.3, and hand the doctor a draft.
+**Goal:** run one consultation through every stage in the right order, time each stage, apply the failure rules from §3.3, save the note automatically (as `ai_scribe`), update the patient record and predict likely outcomes (Step 10b).
 
 **File:** `app/orchestrator/pipeline.py`. The `Orchestrator` class owns:
 - the services (from the registry);
@@ -1618,8 +1821,8 @@ class TavilyResearch:
 The core, verbatim:
 
 ```python
-DISCLAIMER = ("AI-generated draft for clinician review. It is not a diagnosis or a treatment "
-              "recommendation; the doctor makes every clinical decision.")
+DISCLAIMER = ("AI-generated note, saved automatically and awaiting clinician review. It is not a diagnosis "
+              "or a treatment recommendation; the doctor makes every clinical decision.")
 
 
 def _history_query(note: ClinicalNote) -> str:
@@ -1729,20 +1932,45 @@ def _text_slots(n: ClinicalNote) -> list[tuple[str, Callable[[str], None]]]:
                 message="Patient history could not be loaded. Allergy and interaction "
                         "cross-checks were NOT performed for this note."))
 
-        # 6. Draft for the doctor to review
         draft = Draft(note_id=uuid.uuid4().hex, job_id=job.job_id, patient_uuid=job.patient_uuid,
                       note=note, alerts=alerts, stt_engine=transcript.engine, llm_model=extraction.model,
-                      name_terms=job.name_terms)
+                      visit_at=job.created_at, visit_id=job.visit_id, name_terms=job.name_terms)
         self.jobs.drafts[draft.note_id] = draft
-        job.result = ConsultationResult(
+        result = ConsultationResult(
             note_id=draft.note_id, status="draft", note=note, alerts=alerts, checks=checks,
             research=found, privacy=redactions, transcript=transcript,
             speaker_roles=dict(extraction.speaker_roles),
             models={"stt": transcript.engine, "llm": extraction.model}, disclaimer=DISCLAIMER)
-        job.set_stage(Stage.ready_for_review)
-        event("job_ready", job=job.job_id, count=len(alerts), status=checks.safety_check)
-        if self.s.auto_approve:
-            await self.approve(draft.note_id, ApproveRequest())
+
+        # 6. Save to the patient record automatically, marked "ai_scribe" (not yet reviewed)
+        job.set_stage(Stage.saving)
+        t0 = time.perf_counter()
+        try:
+            await self._save_note(draft, note, source="ai_scribe")
+        except Exception as e:                      # nothing is lost: the draft waits for a retry
+            event("stage_degraded", job=job.job_id, stage="saving", code=type(e).__name__)
+            result.alerts = [SafetyAlert(
+                category="data_gap", severity="warning", origin="system",
+                message="This note could not be saved to the patient record. It is kept as a draft for "
+                        f"{self.s.job_ttl_minutes} minutes: review it and tap Save to try again.")] + alerts
+            job.result = result
+            job.set_stage(Stage.ready_for_review)
+            return
+        finally:
+            t["save"] = _ms(t0)
+        draft.status = result.status = "saved"
+
+        # 7. Add what is new to the patient record; ignore what is already there
+        job.set_stage(Stage.updating_record)
+        result.record_update, checks.record_update = await self._update_record(draft, "ai_scribe", t)
+
+        # 8. Re-read the whole history and estimate likely outcomes
+        job.set_stage(Stage.predicting)
+        result.predictions, checks.predictions = await self._predict(job.patient_uuid, job.name_terms, t)
+
+        job.result = result
+        job.set_stage(Stage.saved)
+        event("job_saved", job=job.job_id, count=len(alerts), status=checks.safety_check)
 
     async def _scrub_note(self, note: ClinicalNote, names: list[str]) -> tuple[ClinicalNote, dict[str, int]]:
         copy = note.model_copy(deep=True)
@@ -1776,23 +2004,58 @@ def _text_slots(n: ClinicalNote) -> list[tuple[str, Callable[[str], None]]]:
 | `startup()` | Sweep the scratch folder. `load()` RAG and privacy in threads. Load research inside `try` (failure → `research_ready=False` and log `research_unavailable`; startup continues). `await gpu.startup()`. Spawn `jobs.sweep_forever()`, and `_prefetch()` if configured. `started = True`. Every spawned task goes into a strong-reference set. |
 | `shutdown()` | Cancel the background tasks, `jobs.shutdown()`, `gpu.shutdown()`, unload the CPU services |
 | `readiness()` | `{ready, backends{stt,rag,llm,privacy,research}, gpu_policy, gpu_models_loaded{stt,llm}, research_available, pending_jobs, gpus[]}`. `gpus` is read with `torch.cuda.mem_get_info(i)` **only if torch is already in `sys.modules`**, so it never imports torch on a laptop. |
-| `require_patient(uuid) -> list[str]` | Calls `rag.list_patients()`. Unknown patient → `404 PATIENT_NOT_FOUND`. If the registry is down, it accepts (the job will then show history as unavailable). **It returns the patient's name words** (letters only, ≥3 characters, from `display_name`), which become `deny_terms` for the scrubber. |
-| `submit(upload, uuid, language_hint)` | `429 BUSY` if `pending() ≥ MAX_PENDING_JOBS` → `require_patient` → `intake.save_upload` → `Job(... name_terms=..., language_hint=None if "auto")` → `jobs.submit` → `ConsultationAccepted` with `queue_position` and `status_url` |
+| `_lookup_patient(uuid) -> PatientSummary \| None` | Calls `rag.list_patients()`. Unknown patient → `404 PATIENT_NOT_FOUND`. If the registry is down, returns `None` and the upload is accepted (the job will then show history as unavailable). |
+| `require_patient(uuid) -> list[str]` | `_lookup_patient`, then **the patient's name words** (`_name_terms`: letters only, ≥3 characters, from `display_name`), which become `deny_terms` for the scrubber. |
+| `_check_visit(visit_id, uuid)` | The phone's two IDs must agree. Reads `rag.list_visits(settings.clinic_today())`: `visit_id` not in today's queue → `404 VISIT_NOT_FOUND`; it belongs to another patient → `409 VISIT_PATIENT_MISMATCH`. Queue unreadable → log `visit_registry_unavailable` and accept. |
+| `submit(upload, uuid, language_hint, visit_id=None)` | `429 BUSY` if `pending() ≥ MAX_PENDING_JOBS` → `_lookup_patient` → `_check_visit` (only with a `visit_id`; empty = walk-in) → `intake.save_upload` → `Job(... visit_id=..., name_terms=..., language_hint=None if "auto")` → `jobs.submit` → `rag.mark_visit_seen(visit_id)` (failure is only logged: the recording is already safe) → `ConsultationAccepted` with `queue_position`, `status_url`, and the `patient_uuid`, `display_name` and `visit_id` the recording was attached to. All checks run **before** the audio is read, so a refused upload leaves nothing behind. |
 | `_research(job, note)` | `skipped` if research is off or no known drug was prescribed; `unavailable` if Tavily didn't load, or on any error or timeout (`asyncio.wait_for`). Otherwise `ok`. Times `web_research`. |
-| `_ai_review(job, note, context, found)` | Calls `llm.review_safety` in a thread. Forces `origin="llm"`, normalises `drug` with `rules.generic_name`, then **scrubs the alert messages** (the review read clinic records, which may contain names) with `deny_terms=job.name_terms`. Any error → `([], "unavailable")`. Times `llm_review`. |
+| `_ai_review(job, note, context, found)` | Calls `llm.review_safety` in a thread. Forces `origin="llm"`, normalises `drug` with `rules.generic_name`, then **scrubs the alert messages and evidence snippets** (the review read clinic records, which may contain names) with `deny_terms=job.name_terms`. Any error → `([], "unavailable")`. Times `llm_review`. |
 | `_rule_check(job, note, context)` | `unavailable` without a profile. Otherwise `rules.check(note, profile, date.today())`, with any error → `unavailable`. |
-| `approve(note_id, req)` | Unknown → 404. Not a draft, or already saving → `409 NOTE_NOT_A_DRAFT` (an in-flight set makes a double tap safe). If `req.note` is present, re-scrub it with the draft's `name_terms`; failure → `503 PRIVACY_SCRUB_FAILED`. Build `NoteMeta`, call `rag.save_note` in a thread (failure → `503 SAVE_FAILED`, draft kept), mark the draft `saved`, and mirror the status and note into the job result, whose stage becomes `saved`. |
-| `discard_draft(note_id)` | 404 / 409 as above, then the draft becomes `discarded` and the job stage `discarded` |
+| `_save_note(draft, note, source, …)` | Builds `NoteMeta` (`visit_id`, `source` = `ai_scribe` or `doctor_notes`, `verified_at`, `edited_by_doctor`) and calls `rag.save_note` (an upsert) in a thread. Drops the patient's cached predictions. Times `save` in the pipeline. |
+| `_update_record(draft, source, timings)` | Step 10b. Profile (minus this note's own earlier facts) → `llm.propose_record_updates` → scrub → `record_update.reconcile` → `rag.set_note_facts(note_id, …)`. Any error → `(None, "unavailable")`. Times `record_update`. |
+| `_predict(patient_uuid, name_terms, timings)` | Step 10b. Profile + `get_history` (newest `PREDICTION_MAX_RECORDS`) + `list_notes` → `predictions.rule_predictions` + `llm.predict_outcomes` → `predictions.screen` → scrub → `PredictionReport`, cached per patient. LLM error → rule predictions only, `"partial"`. History or scrub error → `(None, "unavailable")`. Times `predictions`. |
+| `get_predictions(uuid, refresh)` | `require_patient`; return the cached report unless `refresh`; otherwise take the GPU slot, re-check the cache, and run `_predict`. No report → `503 HISTORY_UNAVAILABLE`. |
+| `approve(note_id, req)` | The doctor confirms. Unknown → 404. Already `verified`/`discarded`, or in flight → `409 NOTE_ALREADY_FINAL` (an in-flight set makes a double tap safe). If `req.note` is present, re-scrub it with the draft's `name_terms`; failure → `503 PRIVACY_SCRUB_FAILED`. `_save_note(source="doctor_notes", verified_at=now)` (failure → `503 SAVE_FAILED`, nothing changes). Mark the draft and the job result `verified`. Unchanged note that was already saved → `_confirm_note_facts` (its facts become `doctor_notes`). Edited note, or a retry after a failed automatic save → spawn `_refresh_after_review` (record update + predictions from the doctor's version, on the GPU slot, mirrored into the job result). |
+| `discard_draft(note_id)` | 404 / 409 as above. A saved note is removed with `rag.delete_note` (the note and its facts; failure → `503 HISTORY_UNAVAILABLE`) and the cached predictions are dropped. The draft and job become `discarded`; the job result's `record_update` and `predictions` are cleared. |
 | `ask(uuid, question)` | A regex catches opinion-seeking questions (`diagnos…`, "what do you think", "what's wrong", "should I prescribe/give/start/stop/change", `recommend…`, "best drug/medicine/treatment", "treatment plan", "your opinion"). Those get `QAAnswer(answer=REFUSAL, refused=True)` **with no LLM call**, where `REFUSAL` is the exact sentence from `centralbrain.md`. Otherwise: `require_patient`, then fetch profile + `retrieve(question)`, then take the GPU slot (`async with jobs.gpu_slot`), `gpu.ensure(llm)`, and call `llm.answer_question`. Errors → 503. |
-| `delete_patient(uuid)` | `rag.delete_patient`, then delete that patient's in-memory drafts and clear their job results (cascade) |
+| `delete_patient(uuid)` | `rag.delete_patient`, then delete that patient's cached predictions and in-memory drafts and clear their job results (cascade) |
 
 **Why this order is the core design decision:**
 - The LLM's first pass is the only step that sees the raw transcript, and it runs on our own GPU.
-- Everything after the privacy wall sees only scrubbed text: history lookup, Tavily, the second AI pass, storage and the app.
+- Everything after the privacy wall sees only scrubbed text: history lookup, Tavily, the later AI passes, storage and the app.
 - Because the note is already English by then, the English-only embedding model works, and Tavily gets clean generic drug names.
 - History and research run **in parallel** (tested: two 0.4 s calls finish in about 0.4 s, not 0.8 s).
+- The note is saved before the record update and predictions, so a failure in those later steps never loses it, and the predictions read a history that already includes today's consultation.
 
 **Done when:** `python -c "import app.orchestrator.pipeline"` runs without errors. The full behaviour is verified in Step 12.
+
+### Step 10b — Record update and likely-outcome predictions (added 25 Sep 2026)
+
+**Goal:** after the note is saved, keep the patient's long-term record current without duplicates, then give the doctor the likely outcomes for this patient, each with its reason. Never advice.
+
+**Files:** `app/orchestrator/record_update.py` and `app/orchestrator/predictions.py`, plus two new `LLMService` methods (`propose_record_updates`, `predict_outcomes`) and three new `RAGService` methods (`get_history`, `set_note_facts`, `delete_note`) in `app/contracts.py` (§4).
+
+**10b.1 The record update** (`record_update.py`, tested):
+
+| Name | Behaviour |
+|---|---|
+| `without_note(profile, note_id)` | The profile minus the facts that came from `note_id`, so re-processing a note (after the doctor edits it) replaces its own facts instead of calling them duplicates |
+| `reconcile(proposal, profile, rules)` | Takes the LLM's `RecordUpdate` (`added` / `already_on_record`) and applies the deterministic duplicate check: a candidate that matches an existing fact moves to `already_on_record`; one that repeats an earlier candidate is dropped; "no known allergies" is never recorded. **An allergy the model called redundant but that matches nothing stays in `added`** (missing a new allergy is far worse than recording it twice). Other categories trust the model's "already on record". |
+| matching | **Allergy:** class alias or class name → class (`Penicillins` = `Penicillin`), else generic name. **Medication:** same generic (brands mapped: `Tab Glycomet 500 BD` = `Metformin 500 mg twice daily`) and same strength, the first number; a changed dose is new. **Condition:** equal words, or one contains the other (`Diabetes` ⊂ `Type 2 diabetes`); synonyms ("sugar") are left to the model. |
+| `to_note_facts(changes, source, recorded_on, note_id)` | `RecordChange`s → `NoteFacts` (allergies / active_medications / conditions), each `Fact` tagged with `origin_note_id` |
+
+The LLM prompt (Step 15b) asks for allergies, **ongoing** medications (not fixed short courses like "5 days", not as-needed) and **stated** conditions only. Everything the LLM wrote is scrubbed before it is stored, because it read the stored record.
+
+**10b.2 Predictions** (`predictions.py`, tested). Two sources, merged and sorted high → low likelihood:
+
+| Source | What it finds (demo) |
+|---|---|
+| **Rule engine** (`rule_predictions`, always runs) | *Documented reactions:* every recorded allergy → "An allergic reaction is likely on further exposure to … and other …-class drugs" (high if the reaction is described). *Lab trends:* a lab with ≥2 numeric values that changed by ≥3 % → "likely to be higher/lower than X at the next test if the recent trend continues" (high if ≥3 values move consistently). *Recurring complaints:* a symptom from a saved note that appears in records from ≥2 different dates → "likely to recur or persist". Ravi → penicillin reaction; Lakshmi → knee pain (Mar and Sep 2026); Arjun → HbA1c 7.4 % → 8.1 %. |
+| **LLM** (`predict_outcomes`) | Reads the profile, the history (newest first) and the rule engine's outcomes (so it doesn't repeat them) and returns further predictions with likelihood, timeframe, reasoning and evidence |
+
+`screen()` **withholds** any LLM prediction that cites no evidence, or whose outcome contains advice or instructions (should, recommend, advise, consider, suggest, must, need to, prescribe, referral, surgery, procedure, start/stop/change the dose/medication/treatment…), or whose reasoning gives advice. The count is reported as `withheld`, so a misbehaving prompt is visible. Every prediction's text is scrubbed. The `PredictionReport` is cached in memory per patient (dropped whenever that patient's record changes) and **never stored as a record**, so the AI never reasons from its own earlier guesses.
+
+**Done when:** `python -c "import app.orchestrator.record_update, app.orchestrator.predictions"` runs without errors; the behaviour is verified in Step 12.
 
 ### Step 11 — Routes, security and the app factory
 
@@ -1828,7 +2091,7 @@ def get_orch(request: Request) -> Orchestrator:
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 
 from app.api_models import ConsultationAccepted, JobStatus
 from app.deps import get_orch
@@ -1842,11 +2105,20 @@ router = APIRouter(tags=["consultations"])
 async def create_consultation(
     audio_file: UploadFile = File(..., description="Whole-consultation recording (m4a, webm, mp3, wav, ogg, flac)"),
     patient_uuid: uuid.UUID = Form(...),
+    visit_id: str | None = Form(None, max_length=64,
+                                description="Today's queue entry the doctor picked; omit for a walk-in"),
     language_hint: Literal["auto", "kn", "en"] = Form("auto"),
     orch: Orchestrator = Depends(get_orch),
 ) -> ConsultationAccepted:
-    """Queue a consultation. Returns immediately with a job_id; poll GET /jobs/{job_id}."""
-    return await orch.submit(audio_file, patient_uuid, language_hint)
+    """Queue a consultation. Returns immediately with a job_id; poll GET /jobs/{job_id}.
+    With visit_id, the queue entry must belong to patient_uuid (409 otherwise) and is marked seen."""
+    return await orch.submit(audio_file, patient_uuid, language_hint, visit_id)
+
+
+@router.get("/jobs", response_model=list[JobStatus])
+async def list_jobs(patient_uuid: uuid.UUID = Query(...), orch: Orchestrator = Depends(get_orch)) -> list[JobStatus]:
+    """A patient's recordings still in memory, newest first: the website finds what the phone uploaded."""
+    return [orch.jobs.status(job) for job in orch.jobs.for_patient(patient_uuid)]
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatus)
@@ -1911,16 +2183,17 @@ app = create_app()
 |---|---|
 | `routes/__init__.py` | Empty. The same goes for `app/orchestrator/__init__.py`, `app/services/__init__.py`, `app/services/mocks/__init__.py`, `app/services/real/__init__.py`, `scripts/__init__.py` and `tests/__init__.py`. |
 | `routes/health.py` | `VERSION = "1.0.0"`. `GET /health` → `{"status": "ok", "service": "clinical-scribe-orchestrator", "version": VERSION}`. `GET /ready` → `orch.readiness()` as a `JSONResponse` with status 200 if ready, else 503. `{"ready": false}` if the orchestrator doesn't exist yet. |
-| `routes/notes.py` | `POST /notes/{note_id}/approve`. Body `ApproveRequest \| None = None` (no body = approve as-is), returns `ApproveResponse`. `POST /notes/{note_id}/discard` → `{note_id, status}`. |
-| `routes/patients.py` | A helper `_rag(fn, *args)` that runs a RAG call in a thread and turns any error into `503 HISTORY_UNAVAILABLE`. Then the P1/P2 patient endpoints from §5.1 and `POST /search/similar` (body `SimilarSearchRequest` → `rag.search_similar(query, top_k)`). |
+| `routes/notes.py` | `POST /notes/{note_id}/approve` (the doctor confirms). Body `ApproveRequest \| None = None` (no body = confirm as-is), returns `ApproveResponse`. `POST /notes/{note_id}/discard` → `await orch.discard_draft(...)` → `{note_id, status}`. |
+| `routes/patients.py` | A helper `_rag(fn, *args)` that runs a RAG call in a thread and turns any error into `503 HISTORY_UNAVAILABLE`. Then the patient endpoints from §5.1, including `GET /patients?q=` (case-insensitive name filter, 1–50 characters), `GET /visits/today` (`_rag(rag.list_visits, orch.s.clinic_today())`, each visit turned into a `QueueEntry` with the newest job from `jobs.latest_for_visits()`), `GET /patients/{uuid}/predictions?refresh=` → `orch.get_predictions`, and `POST /search/similar` (body `SimilarSearchRequest` → `rag.search_similar(query, top_k)`). |
 
 **CORS notes.** `allow_origins=["*"]` must go with `allow_credentials=False`, because browsers reject a wildcard with credentials. We authenticate with a header, not cookies, so credentials aren't needed. `allow_headers=["*"]` lets Flutter Web send `X-API-Key` and `ngrok-skip-browser-warning` (tested with a real preflight request).
 
 **Done when:**
 1. `uvicorn app.main:app --port 8000` starts (always one worker; never `--workers N`).
 2. `/health` returns 200, `/ready` returns 200 with the mock backends, and `/docs` opens.
-3. `curl -F "audio_file=@visit.m4a;type=audio/mp4" -F "patient_uuid=cb2759d8-3d91-4a4d-8bd2-026f68f76426" http://127.0.0.1:8000/api/v1/consultations` returns 202.
-4. The `status_url` reaches `ready_for_review` within a few seconds, with the critical allergy alert.
+3. `curl http://127.0.0.1:8000/api/v1/visits/today` lists Ravi, Lakshmi and Arjun (tokens 1–3, `waiting`).
+4. `curl -F "audio_file=@visit.m4a;type=audio/mp4" -F "patient_uuid=cb2759d8-3d91-4a4d-8bd2-026f68f76426" -F "visit_id=<Ravi's visit_id>" http://127.0.0.1:8000/api/v1/consultations` returns 202 with `"display_name": "Ravi K."`.
+5. The `status_url` reaches `saved` within about 10 seconds (realistic mock delays), with the critical allergy alert, `record_update` and `predictions`. `/visits/today` now shows Ravi as `seen` with that `job_id`.
 
 ### Step 12 — Tests and tooling
 
@@ -1936,27 +2209,30 @@ app = create_app()
 - A `settings` fixture: `Settings(app_env="test", mock_latency_scale=0.0, audio_scratch_dir=tmp_path/"scratch", samples_dir=tmp_path/"no-samples", research_backend="mock")`.
 - A `make_client(**overrides)` factory that builds `TestClient(create_app(settings.model_copy(update=overrides)))` and enters it, so the lifespan runs.
 - Helpers:
-  - `submit(client, patient, audio, scenario)`, which sets `client.app.state.orch.svc.stt.default_scenario` before posting;
+  - `submit(client, patient, audio, scenario, **form)`, which sets `client.app.state.orch.svc.stt.default_scenario` before posting (extra form fields such as `visit_id` pass straight through);
   - `wait(client, job_id)`, which polls every 20 ms until a finished stage;
   - `run_job(...)`.
 - Constants for the three patient UUIDs, and `AUDIO = ("visit.m4a", b"\x00\x00\x00\x18ftypM4A " + b"\x00" * 4096, "audio/mp4")`.
 
 Failures are simulated by replacing a method on the live service, for example `orch(client).svc.llm.extract_note = boom`.
 
-**What the 38 tests prove:**
+**What the 55 tests prove** (38 originally; 12 added with the 25 Sep 2026 update; 5 with the doctor's-phone update):
 
 | Area | Tests |
 |---|---|
-| API contract | health/ready; patient list and profile; API key (401 without it, 200 with it, `/health` stays open); 415 for text; **octet-stream + `.m4a` accepted** (Dart's default); **`audio/webm;codecs=opus` accepted** (Flutter Web); 400 empty; 413 too large; 422 missing file or bad UUID; 404 unknown patient |
+| API contract | health/ready; patient list and profile; **name search (`?q=`)**; API key (401 without it, 200 with it, `/health` stays open); 415 for text; **octet-stream + `.m4a` accepted** (Dart's default); **`audio/webm;codecs=opus` accepted** (Flutter Web); 400 empty; 413 too large; 422 missing file or bad UUID; 404 unknown patient |
+| Today's queue (doctor's phone) | Ravi, Lakshmi, Arjun in token order, all `waiting`. **Upload with Ravi's `visit_id` → 202 names "Ravi K."; the note lands on Ravi only** (with the `visit_id`), Lakshmi's and Arjun's records stay empty; Ravi becomes `seen` with the `job_id` and `saved` stage; `GET /jobs?patient_uuid=` finds the job. **Lakshmi's `visit_id` with Ravi's `patient_uuid` → 409 `VISIT_PATIENT_MISMATCH`, no job**; unknown `visit_id` → 404 `VISIT_NOT_FOUND`. Walk-in without `visit_id` → saved. Queue unreadable → upload still accepted. Deleting a patient removes them from the queue. |
 | Queue | Two uploads while job 1 is held on the "GPU" → positions 0 and 1; a third → `429 BUSY`; **`/health` still answers while a job is running** (no frozen event loop) |
-| Scenarios | Ravi → critical `allergy_conflict` + info `history_contradiction`, `safety_check=complete`, `privacy={"PERSON":1}`, research for amoxicillin + paracetamol, speaker roles, all timings present, **scratch folder empty afterwards**. Lakshmi → critical interaction with `drug="ibuprofen"` from "Brufen". Arjun → HbA1c `possible_omission`. |
-| Failure rules | History down → still a draft, `safety_check=unavailable`, `data_gap` alert first. Tavily down → continues, `web_research=unavailable`, still `complete`. AI review down → `partial`, rule alerts still present. LLM down → `failed` / `NOTE_GENERATION_FAILED`, **no Tavily call**, audio deleted. **Scrub down → `failed` / `PRIVACY_SCRUB_FAILED`, no result and no Tavily call.** No speech → `NO_SPEECH`. |
-| Doctor actions | Approve → saved once, 409 on a second approve. **An edited note is scrubbed again** ("Ravi says…" → "&lt;PERSON&gt; says…"). An approved `allergies_mentioned` appears in the profile (memory loop). Discard → approve returns 409. |
+| Scenarios | Ravi → critical `allergy_conflict` + info `history_contradiction`, `safety_check=complete`, `privacy={"PERSON":1}`, research for amoxicillin + paracetamol, speaker roles, all timings present, **scratch folder empty afterwards**, **saved automatically as one `ai_scribe` note (scrubbed)**, penicillin-reaction prediction. Lakshmi → critical interaction with `drug="ibuprofen"` from "Brufen". Arjun → HbA1c `possible_omission`. |
+| Failure rules | History down → still saved, `safety_check=unavailable`, `data_gap` alert first, record update and predictions `unavailable`. Tavily down → continues, `web_research=unavailable`, still `complete`. AI review down → `partial`, rule alerts still present. LLM down → `failed` / `NOTE_GENERATION_FAILED`, **no Tavily call, nothing saved**, audio deleted. **Scrub down → `failed` / `PRIVACY_SCRUB_FAILED`, no result, nothing saved and no Tavily call.** No speech → `NO_SPEECH`. **Automatic save down → `ready_for_review` draft with a top alert; confirming saves it** and the record update and predictions follow. Record update down → the note is still saved. |
+| Record update | Arjun → Atorvastatin **added** (`ai_scribe`, with `origin_note_id`), Metformin **already on record** (not stored twice); the same consultation again adds nothing. Unit: brand = generic, dose change is new, class alias, condition containment, "no known allergies" never recorded, **an allergy the model wrongly calls redundant is kept**. `ai_scribe` facts raise alerts but never "take precedence". |
+| Doctor actions | Confirm → `verified`, 409 `NOTE_ALREADY_FINAL` on a second confirm, still one note (upsert), now `doctor_notes`; the note's facts become `doctor_notes`. **An edited note is scrubbed again** ("Ravi says…" → "&lt;PERSON&gt; says…"). An edited `allergies_mentioned` appears in the profile (memory loop, via the background record update). **Discard removes the note and its facts from the record**; confirm then returns 409. |
+| Predictions | Lakshmi → knee pain recurrence citing the 14 Mar 2026 doctor note and today's `ai_scribe` note; Arjun → HbA1c trend with exact reasoning; every prediction cites evidence. **AI predictions that give advice ("should start insulin") or cite nothing are withheld** and counted. AI down → rule predictions only, `partial`. `GET /patients/{id}/predictions` generates, caches and refreshes; 404 for an unknown patient. Unit: rising / falling / stable lab trends. |
 | Privacy | **No patient text in any log line**, and every Tavily query matches the fixed template with no names. A 5 MB upload is never rolled over to disk (`UploadFile.file._rolled` is False). |
 | Parallelism | History + research with 0.4 s each → `gathering_context` < 0.75 s |
 | Rules and research units | Brand mapping; class allergy; no false alarm; interaction within one prescription; monitoring skipped when the lab is ordered; merge de-duplication and sorting; query building; Tavily domain filter and 500-character snippets |
 | Q&A and search | An opinion question → exact refusal; a factual question → answered. Similar-case search finds Lakshmi for "knee pain"; delete → 404 afterwards. |
-| Ollama adapter | Sends the schema and temperature 0; retries once on invalid JSON; alerts marked `llm`; `keep_alive` for load/unload (against `httpx.MockTransport`) |
+| Ollama adapter | Sends the schema and temperature 0; retries once on invalid JSON; alerts marked `llm`; record-update and prediction calls send their schemas, predictions marked `llm`; `keep_alive` for load/unload (against `httpx.MockTransport`) |
 
 Two of the tests, verbatim, because they guard the two easiest mistakes to make:
 
@@ -1995,8 +2271,8 @@ def test_no_phi_in_logs_or_search_queries(client, caplog):
 2. takes the first patient unless `--patient` is given;
 3. uploads `--audio` with a MIME type from the file extension;
 4. polls every 2 s and prints each new `stage_label` with elapsed seconds;
-5. prints `timings_ms`, `checks`, `privacy`, each alert as `[severity] category (origin): message`, and the research drug and hit counts;
-6. optionally approves (`--approve`).
+5. prints `timings_ms`, `checks`, `privacy`, each alert as `[severity] category (origin): message`, the research drug and hit counts, the record update (added / already on record) and each prediction as `[likelihood] (origin) outcome`;
+6. fails (exit 1) unless the job reached `saved`, then optionally confirms the note (`--approve`).
 
 Exit code 0 means the whole flow worked.
 
@@ -2008,7 +2284,9 @@ python scripts/smoke_test.py --base-url https://<your-domain>.ngrok-free.app --a
 
 The privacy probe scrubs *"Ravi reports a headache for 3 days; Amoxicillin 500 mg prescribed. Call 9845012345."* with `allow_terms=["Amoxicillin"]` and `deny_terms=["Ravi"]`, so a bad Presidio configuration is visible at a glance.
 
-**Done when:** `pytest -q` prints `38 passed`, and `python -m scripts.probe_module rag` lists 3 patients.
+The rag probe also calls `get_history` (newest first); the llm probe also calls `propose_record_updates` and `predict_outcomes` and reports how many predictions the no-advice screen would withhold.
+
+**Done when:** `pytest -q` prints `50 passed`, and `python -m scripts.probe_module rag` lists 3 patients.
 
 ### Step 13 — Deploy on Kaggle
 
@@ -2146,6 +2424,10 @@ def stop(server) -> None:
 
 **Goal:** the frontend teammate can connect without reading the backend code. Share §5 and this step.
 
+**Two roles, one backend:**
+- **The doctor's phone** (Flutter mobile) does exactly two things: **pick the patient** who is walking in from today's queue, and **record**. Nothing else.
+- **The doctor's website** (Flutter web) is where everything gets reviewed: the note, alerts, record update, likely outcomes, and Confirm/Discard.
+
 **Settings the app needs:**
 - **Base URL.** `flutter run --dart-define=API_BASE_URL=https://<your-domain>.ngrok-free.app --dart-define=API_KEY=<key>`. The static domain never changes, so it's set once.
 - **Headers on every request.** `ngrok-skip-browser-warning: 1`, plus `X-API-Key` when a key is set.
@@ -2174,22 +2456,50 @@ Map<String, String> get _headers => {
       if (apiKey.isNotEmpty) 'X-API-Key': apiKey,
     };
 
+/// Phone: today's queue in token order. Each entry has visit_id, patient_uuid, display_name,
+/// age, sex, token, status ('waiting' | 'seen') and job_id / job_stage / job_stage_label.
+Future<List<Map<String, dynamic>>> todaysQueue() async {
+  final res = await http.get(Uri.parse('$baseUrl/api/v1/visits/today'), headers: _headers);
+  if (res.statusCode != 200) throw Exception(jsonDecode(res.body)['error']['message']);
+  return (jsonDecode(res.body) as List).cast<Map<String, dynamic>>();
+}
+
+/// Phone: search every patient by name (walk-ins who are not in today's queue).
+Future<List<Map<String, dynamic>>> searchPatients(String q) async {
+  final res = await http.get(Uri.parse('$baseUrl/api/v1/patients')
+      .replace(queryParameters: {'q': q}), headers: _headers);
+  if (res.statusCode != 200) throw Exception(jsonDecode(res.body)['error']['message']);
+  return (jsonDecode(res.body) as List).cast<Map<String, dynamic>>();
+}
+
 /// Works on web and mobile: pass the recorded bytes (mobile: await File(path).readAsBytes()).
-Future<String> submitConsultation(List<int> audio,
-    {required String filename, required String mime, required String patientUuid}) async {
+/// visitId: the queue entry the doctor picked (null for a walk-in found through search).
+/// Returns the 202 body: show "Uploaded for ${body['display_name']}". That's who the SERVER linked it to.
+Future<Map<String, dynamic>> submitConsultation(List<int> audio,
+    {required String filename, required String mime, required String patientUuid, String? visitId}) async {
   final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/v1/consultations'))
     ..headers.addAll(_headers)
     ..fields['patient_uuid'] = patientUuid
     ..fields['language_hint'] = 'auto'
     ..files.add(http.MultipartFile.fromBytes('audio_file', audio,
         filename: filename, contentType: MediaType.parse(mime)));   // e.g. 'audio/mp4' or 'audio/webm'
+  if (visitId != null) req.fields['visit_id'] = visitId;
   final res = await http.Response.fromStream(await req.send());
   final body = jsonDecode(res.body) as Map<String, dynamic>;
+  // 409 VISIT_PATIENT_MISMATCH / 404 VISIT_NOT_FOUND: refresh the queue and let the doctor pick again.
   if (res.statusCode != 202) throw Exception(body['error']['message']);
-  return body['job_id'] as String;
+  return body;
 }
 
-const _finished = {'ready_for_review', 'saved', 'discarded', 'failed'};
+/// Website: the recordings the phone made for this patient, newest first.
+Future<List<Map<String, dynamic>>> jobsForPatient(String patientUuid) async {
+  final res = await http.get(Uri.parse('$baseUrl/api/v1/jobs')
+      .replace(queryParameters: {'patient_uuid': patientUuid}), headers: _headers);
+  if (res.statusCode != 200) throw Exception(jsonDecode(res.body)['error']['message']);
+  return (jsonDecode(res.body) as List).cast<Map<String, dynamic>>();
+}
+
+const _finished = {'saved', 'verified', 'ready_for_review', 'discarded', 'failed'};
 
 /// Emits every poll result (update the progress UI); completes when the job is finished.
 Stream<Map<String, dynamic>> watchJob(String jobId) async* {
@@ -2204,29 +2514,48 @@ Stream<Map<String, dynamic>> watchJob(String jobId) async* {
   throw TimeoutException('Processing took longer than 15 minutes');
 }
 
-Future<void> approve(String noteId, {Map<String, dynamic>? editedNote}) async {
+/// The doctor confirms the automatically saved note (optionally with edits).
+Future<void> confirmNote(String noteId, {Map<String, dynamic>? editedNote}) async {
   final res = await http.post(Uri.parse('$baseUrl/api/v1/notes/$noteId/approve'),
       headers: {..._headers, 'Content-Type': 'application/json'},
       body: jsonEncode({if (editedNote != null) 'note': editedNote}));
   if (res.statusCode != 200) throw Exception(jsonDecode(res.body)['error']['message']);
 }
+
+/// Likely outcomes for the analysis page (cached server-side; refresh regenerates).
+Future<Map<String, dynamic>> predictions(String patientUuid, {bool refresh = false}) async {
+  final res = await http.get(
+      Uri.parse('$baseUrl/api/v1/patients/$patientUuid/predictions?refresh=$refresh'), headers: _headers);
+  final body = jsonDecode(res.body) as Map<String, dynamic>;
+  if (res.statusCode != 200) throw Exception(body['error']['message']);
+  return body;
+}
 ```
 
-**Screens that turn the response into a strong demo:**
-1. **Patient picker** from `GET /patients`, plus a profile card from `GET /patients/{id}` showing allergies and medications with their source and date.
-2. **Recording** with a timer, then a **progress view** showing `stage_label`, `progress` and `queue_position`.
-3. **Draft review:**
+**Phone screens (Flutter mobile): pick, record, done.**
+1. **Today's queue** from `GET /visits/today`: token, name, age/sex. `waiting` rows first; `seen` rows greyed, each with its `job_stage_label` (e.g. "Saved to the patient record…"). Pull to refresh; refresh every few seconds while any row's job is still running. A **search box** (`GET /patients?q=`) finds walk-ins who are not in the queue.
+2. **Tap a patient → recording screen** with a large, fixed banner: "Recording for **Ravi K.**, 54 M · Token 1". **The patient can't be changed while recording**: stop or cancel first. Big Record/Stop button and a timer.
+3. **Stop → upload at once** with `patient_uuid` and `visit_id` (walk-ins: `patient_uuid` only). Show "Uploaded for **`display_name`**" **from the 202 response**, then return to the queue. On `409`/`404` for the visit, refresh the queue and ask the doctor to pick again. On a network failure, keep the recording and offer Retry. **Never upload without a picked patient.**
+
+**Website screens (Flutter web): everything the doctor reviews.**
+1. **Today's queue** (the same `GET /visits/today`), with a search for any patient. Opening a `seen` row loads its `job_id` via `GET /jobs/{job_id}`; for a walk-in, use `GET /jobs?patient_uuid=`. Show a **progress view** (`stage_label`, `progress`, `queue_position`) while it runs. A profile card from `GET /patients/{id}` shows allergies and medications with their source and date (an "AI scribe" badge on `ai_scribe` facts).
+2. **Consultation result** (the note is already saved):
+   - an "AI scribe, awaiting your review" banner until the doctor confirms;
    - alert cards coloured by `severity`, each with its evidence (source + date) and an origin chip ("Rule check" / "AI review" / "System");
    - `checks` chips, with `safety_check` shown prominently;
    - the editable note;
+   - "Added to record" and "Already on record (ignored)" lists from `record_update`;
    - "Latest information" cards from `research` (title, domain, date, open link);
    - the transcript with `speaker_roles` shown as Doctor / Patient. It needs a **Kannada-capable font**, for example Noto Sans Kannada via `google_fonts`;
    - the privacy count ("1 identifier removed");
    - the `disclaimer`;
-   - **Approve & Save** and **Discard** buttons.
+   - **Confirm** (sends the edits, if any) and **Discard** (removes the note and its facts from the record) buttons.
+3. **Likely outcomes** (the doctor's analysis page) from `result.predictions` or `GET /patients/{id}/predictions`: one card per prediction with likelihood, timeframe, reasoning, cited evidence (source + date) and an origin chip ("Rule check" / "AI"), plus the report's `disclaimer` and "N withheld" when non-zero. Never styled as advice.
 4. Optional, P1/P2: patient history timeline, similar-case search, and "Ask about this patient", which shows the refusal behaviour live.
 
-**Done when:** the Flutter app, pointed at the Kaggle URL, shows a Ravi draft with the red allergy alert and saves it with Approve. Test this on **both web and mobile**.
+A saved note stays in the record after the job expires (60 min): `GET /patients/{id}/notes` lists it, with its `visit_id`. Only the transcript and the Confirm/Discard buttons expire with the job.
+
+**Done when:** on the **phone**, the doctor picks Ravi from today's queue, records, and sees "Uploaded for Ravi K.", and Ravi turns `seen`. On the **website**, opening Ravi shows the saved note with the red allergy alert and the likely-outcome panel, and Confirm turns it into a doctor note.
 
 ### Step 15 — Hooking in Module 4 (our LLM and privacy)
 
@@ -2340,10 +2669,13 @@ The deny-list is the patient's own name words, from `require_patient` in Step 10
 |---|---|
 | `_Extraction` | Pydantic model with `note: ClinicalNote` and `speaker_roles` |
 | `_Review` / `_Alert` | `alerts: list[_Alert]`. Each `_Alert` has category (without `data_gap`), severity, message, drug and evidence. |
+| `_Predictions` / `_Prediction` | `predictions: list[_Prediction]`; each has outcome, likelihood, timeframe, reasoning and evidence (the origin is set by the adapter) |
 | `_Answer` | `answer: str` |
 | `load()` | Posts an empty chat with `keep_alive: "60m"`, which loads the model into VRAM |
 | `unload()` | `keep_alive: 0`, which frees VRAM for `GPU_POLICY=swap` |
 | `review_safety` | Sends `{new_note, patient_records, web_research}` as JSON and returns `SafetyAlert(origin="llm", ...)` |
+| `propose_record_updates` | Sends `{new_note, current_record}` with the `RecordUpdate` schema and returns the model's `added` / `already_on_record` split (the orchestrator re-checks it, Step 10b) |
+| `predict_outcomes` | Sends `{record, history, already_identified}` with the `_Predictions` schema and returns `Prediction(origin="llm", ...)` (the orchestrator screens them, Step 10b) |
 | `answer_question` | Answers only from the records provided |
 
 **The prompts' non-negotiables:**
@@ -2351,11 +2683,14 @@ The deny-list is the patient's own name words, from `require_patient` in Step 10
 - **Never add a diagnosis**; fill `doctor_assessment` only if the doctor stated one.
 - Keep drug names exactly as spoken, and translate everything into English.
 - In the review: report only evidence-backed issues and cite the evidence. Never recommend or instruct; state facts. Return no alerts if nothing is found.
+- In the record update: allergies, **ongoing** medications (no short fixed courses, no as-needed drugs) and **stated** conditions only; split into new vs already on record, recognising brand/generic names and synonyms.
+- In the predictions: possible future developments only, each with likelihood, timeframe, reasoning and at least one cited record; **never recommend tests, drugs, procedures, referrals or treatment, and never diagnose**; mention when a prediction depends on unreviewed `ai_scribe` records; don't repeat `already_identified`; return none if the records aren't enough.
+- Every prompt says that `ai_scribe` records were saved automatically and are not yet reviewed.
 
 **15c. Web research is already done** by the orchestrator (Step 9) and handed to `review_safety`. **Don't let the LLM call Tavily itself**, or the "only generic drug names leave the server" guarantee is lost.
 
 **Done when:**
-1. With `LLM_BACKEND=real` and `PRIVACY_BACKEND=real` on the Kaggle GPU (STT and RAG still on mocks), `python -m scripts.probe_module llm` returns the scenario's prescriptions and speaker roles.
+1. With `LLM_BACKEND=real` and `PRIVACY_BACKEND=real` on the Kaggle GPU (STT and RAG still on mocks), `python -m scripts.probe_module llm` returns the scenario's prescriptions and speaker roles, a sensible record update, and predictions of which none would be withheld (with `MOCK_DEFAULT_SCENARIO=diabetes` too).
 2. `python -m scripts.probe_module privacy` shows "3 days" and "Amoxicillin" intact.
 3. The smoke test passes.
 
@@ -2436,12 +2771,17 @@ class RealSTT:
 | Our method | Look for in their module | Conversion |
 |---|---|---|
 | `list_patients()` | The patient table in the mock clinic DB | IDs → `uuid.UUID`; name → `display_name` (pseudonyms for the demo) |
-| `get_profile(uuid)` | Structured allergies, medications, conditions and labs: **tables, not the vector store** | Every item becomes a `Fact` with `source` and `recorded_on`; the precedence rule and alert evidence depend on them. Add approved notes' `allergies_mentioned` as `doctor_notes` facts. |
+| `list_visits(day)` | Today's queue / appointments table in the clinic DB, joined with the patient table | One `Visit` per entry for that date, **token order**: a stable `visit_id` (string), `patient_uuid`, `display_name`, `age`, `sex`, `token`, `status` (`waiting` / `seen`). `day` is the clinic's local date (IST). |
+| `mark_visit_seen(visit_id)` | An update on that queue row | Set it to seen; `True` if the row exists, else `False` |
+| `get_profile(uuid)` | Structured allergies, medications, conditions and labs: **tables, not the vector store** | Every item becomes a `Fact` with `source` and `recorded_on`; the precedence rule and alert evidence depend on them. Include the facts stored by `set_note_facts`, with their `source` and `origin_note_id`. |
+| `get_history(uuid)` | Every stored record for the patient (clinic data and saved notes) | `ContextChunk`s, **newest first**, with `source` (`clinic_db` / `doctor_notes` / `ai_scribe`) and `recorded_on` |
+| `set_note_facts(uuid, note_id, facts)` | A facts table keyed by `(patient_uuid, origin_note_id)` in the doctor's DB | Replace every fact from `note_id` with `facts` (allergies / active medications / conditions). Return the count. |
+| `delete_note(uuid, note_id)` | Delete from the doctor's DB and the vector store | Remove the note **and** the facts it added. Return the number of records removed. |
 | `retrieve(uuid, query, k)` | Vector search filtered on `patient_uuid` metadata | `source: doctor_personal_notes` → `doctor_notes`; date strings → `date` |
-| `save_note(uuid, note, alerts, meta)` | Insert into the doctor's DB (Tier 2) and embed | Embed `note.summary` plus symptoms and prescriptions, with metadata `patient_uuid`, `source`, `recorded_on = meta.visit_at.date()`. Return an ID. |
+| `save_note(uuid, note, alerts, meta)` | Insert into the doctor's DB (Tier 2) and embed | **Upsert by `meta.note_id`** (the doctor's confirmation replaces the AI version). Embed `note.summary` plus symptoms and prescriptions, with metadata `patient_uuid`, `source = meta.source` (`ai_scribe` / `doctor_notes`), `recorded_on = meta.visit_at.date()`. Return the ID. |
 | `list_notes(uuid)` / `search_similar(q, k)` / `delete_patient(uuid)` | Tier 2 query / cross-patient vector search / cascading delete | → `SavedNote` / `SimilarCase` (needs `display_name`) / number of records removed |
 
-**Seed their database with our three demo patients** from `app/fixtures/demo_patients.json`, inside `RealRAG.load()`. Files in `/kaggle/working` are wiped when the Kaggle session ends, so seeding at startup keeps the demo reproducible.
+**Seed their database with our three demo patients** from `app/fixtures/demo_patients.json`, inside `RealRAG.load()`, and put the ones with a `queue_token` into today's queue in that order. Files in `/kaggle/working` are wiped when the Kaggle session ends, so seeding at startup keeps the demo reproducible.
 
 **16.5 The usual merge bugs, and where to fix them** (always in the adapter):
 
@@ -2511,8 +2851,8 @@ Commit `requirements-kaggle.txt` and install from it on merge day.
 
 | Phase | When | What | Checkpoint to move on |
 |---|---|---|---|
-| **A** | Now, before the event | Steps 0–12 on a laptop, all mocks, with a real Tavily key | `pytest` → 38 passed; the curl flow reaches `ready_for_review` |
-| **B** | First hours | Step 13 on a Kaggle **CPU** session with mocks. The Flutter web + mobile app talks to the ngrok URL (Step 14). Dependency rehearsal (16.6). | Flutter shows Ravi's draft with the red alert and approves it; `requirements-kaggle.txt` committed |
+| **A** | Now, before the event | Steps 0–12 (including 10b) on a laptop, all mocks, with a real Tavily key | `pytest` → 50 passed; the curl flow reaches `saved` |
+| **B** | First hours | Step 13 on a Kaggle **CPU** session with mocks. The Flutter web + mobile app talks to the ngrok URL (Step 14). Dependency rehearsal (16.6). | Flutter shows Ravi's saved note with the red alert and the likely-outcome panel, and confirms it; `requirements-kaggle.txt` committed |
 | **C** | Middle | Module 4 (LLM + Presidio, Step 15) on the Kaggle **GPU**, STT and RAG still mocks | Probe `llm` / `privacy` clean; smoke test passes with `LLM_BACKEND=real`, `PRIVACY_BACKEND=real` |
 | **D** | End: merge | Step 16: RAG adapter → STT adapter → full end-to-end | Each module's probe is clean; smoke test passes on all three samples |
 | **E** | Final hours | Record demo audio, measure timings, freeze code, rehearse Step 17 | Two clean full runs in a row, and the backup video recorded |
@@ -2531,6 +2871,10 @@ Commit `requirements-kaggle.txt` and install from it on merge day.
 | GPU out of memory | Medium | High | One GPU slot; STT on GPU 0 and LLM on GPU 1; ≤14B at 4-bit; `swap` for a single GPU |
 | LLM returns invalid JSON or misses an alert | Medium | Medium | JSON-schema output + validation + retry; the deterministic rule check guarantees the key alerts |
 | LLM "diagnoses" in a note or answer | Low | High (liability) | No diagnosis field; prompt rules; the Q&A pre-filter refuses opinion questions without calling the LLM |
+| An automatically saved AI mistake (e.g. a mistranscribed drug) enters the record | Medium | High | Saved as `ai_scribe`: it never takes precedence over doctor notes or clinic records; "awaiting your review" banner; Confirm corrects it, Discard removes the note and its facts |
+| The record update drops a genuinely new fact as "already on record" | Low | High for allergies | Deterministic re-check; the model can never drop an allergy that matches nothing on record |
+| Predictions read as medical advice or a diagnosis | Medium | High (liability) | Evidence required; advice wording is withheld and counted; "not a diagnosis, advice or treatment recommendation" disclaimer; pitch line softened (§1.3) |
+| Predictions built on earlier predictions (a feedback loop) | Low | Medium | Predictions are memory-only and never passed to `save_note` |
 | Presidio misses a name or erases clinical text | Medium | Medium | Tested configuration (Step 15a): deny-list of the patient's names, `allow_list`, `score_threshold`, `en_core_web_lg` |
 | Tavily down, slow or out of credits | Low | Low | Timeout, 24 h cache, pre-fetch; the job continues with `web_research=unavailable` |
 | ngrok free limits (1 GB, 20k requests) or the browser warning page | Low | Medium | 32 kbps mono audio, 2 s polling, the skip-warning header on every request |
@@ -2544,7 +2888,7 @@ Commit `requirements-kaggle.txt` and install from it on merge day.
 
 This hackathon build is intentionally one process with everything in memory. For a real clinic:
 - **Infrastructure:** the orchestrator runs on the clinic's own GPU server (no tunnel, TLS end to end); jobs move to a durable queue and database (for example Redis and Postgres); one worker per GPU.
-- **Access:** the shared API key is replaced by per-doctor login (OAuth/OIDC), with an audit log of every approve and edit.
+- **Access:** the shared API key is replaced by per-doctor login (OAuth/OIDC), with an audit log of every confirmation, edit and discard.
 - **Safety data:** the demo drug table is replaced by a licensed drug-interaction database, and Presidio is tuned on real Indian clinical text.
 - **Compliance:** HIPAA-style controls, plus India's **Digital Personal Data Protection Act, 2023**. The cascading deletion endpoint already demonstrates the "right to erasure".
 
@@ -2612,12 +2956,16 @@ H='ngrok-skip-browser-warning: 1'  # add: -H "X-API-Key: <key>" when API_KEY is 
 
 curl -s $BASE/health
 curl -s -H "$H" $BASE/ready
-curl -s -H "$H" $BASE/api/v1/patients
+curl -s -H "$H" $BASE/api/v1/visits/today                            # today's queue (the phone's list)
+curl -s -H "$H" "$BASE/api/v1/patients?q=ravi"                       # search, for walk-ins
 curl -s -H "$H" -X POST $BASE/api/v1/consultations \
      -F "audio_file=@visit.webm;type=audio/webm" \
-     -F "patient_uuid=cb2759d8-3d91-4a4d-8bd2-026f68f76426" -F "language_hint=auto"
+     -F "patient_uuid=cb2759d8-3d91-4a4d-8bd2-026f68f76426" -F "visit_id=<Ravi's visit_id>" -F "language_hint=auto"
 curl -s -H "$H" $BASE/api/v1/jobs/<job_id>
-curl -s -H "$H" -X POST $BASE/api/v1/notes/<note_id>/approve
+curl -s -H "$H" "$BASE/api/v1/jobs?patient_uuid=cb2759d8-3d91-4a4d-8bd2-026f68f76426"   # the website finds it
+curl -s -H "$H" -X POST $BASE/api/v1/notes/<note_id>/approve          # the doctor confirms the saved note
+curl -s -H "$H" -X POST $BASE/api/v1/notes/<note_id>/discard          # or removes it (and its facts)
+curl -s -H "$H" "$BASE/api/v1/patients/9c7aa0d7-24a7-4a0d-93f0-3695c5d4df45/predictions?refresh=true"
 curl -s -H "$H" -H "Content-Type: application/json" -X POST $BASE/api/v1/search/similar -d '{"query": "knee pain"}'
 curl -s -H "$H" -H "Content-Type: application/json" -X POST $BASE/api/v1/patients/cb2759d8-3d91-4a4d-8bd2-026f68f76426/ask \
      -d '{"question": "What do you think is wrong with this patient?"}'     # -> the refusal sentence

@@ -1,0 +1,63 @@
+{
+  "_comment": "DEMO ONLY. A tiny hand-made table so the demo alerts never depend on the LLM. NOT clinically validated: have a clinician review it. A real product needs a licensed drug-interaction database.",
+  "brands": {
+    "augmentin": "amoxicillin-clavulanate",
+    "mox": "amoxicillin",
+    "novamox": "amoxicillin",
+    "dolo": "paracetamol",
+    "crocin": "paracetamol",
+    "calpol": "paracetamol",
+    "brufen": "ibuprofen",
+    "ibugesic": "ibuprofen",
+    "combiflam": "ibuprofen-paracetamol",
+    "voveran": "diclofenac",
+    "ecosprin": "aspirin",
+    "disprin": "aspirin",
+    "warf": "warfarin",
+    "acitrom": "acenocoumarol",
+    "glycomet": "metformin",
+    "pan": "pantoprazole",
+    "pantocid": "pantoprazole",
+    "azee": "azithromycin",
+    "azithral": "azithromycin",
+    "taxim-o": "cefixime"
+  },
+  "classes": {
+    "penicillin": ["amoxicillin", "amoxicillin-clavulanate", "ampicillin", "penicillin", "benzylpenicillin",
+                   "phenoxymethylpenicillin", "cloxacillin", "flucloxacillin", "piperacillin"],
+    "sulfonamide": ["sulfamethoxazole", "co-trimoxazole", "cotrimoxazole", "sulfasalazine", "sulfadiazine"],
+    "nsaid": ["ibuprofen", "ibuprofen-paracetamol", "diclofenac", "aceclofenac", "naproxen", "aspirin",
+              "ketorolac", "mefenamic acid", "indomethacin", "piroxicam", "etoricoxib", "celecoxib"],
+    "anticoagulant": ["warfarin", "acenocoumarol", "heparin", "enoxaparin", "apixaban", "rivaroxaban", "dabigatran"],
+    "nitrate": ["isosorbide mononitrate", "isosorbide dinitrate", "nitroglycerin", "glyceryl trinitrate"],
+    "pde5_inhibitor": ["sildenafil", "tadalafil", "vardenafil"],
+    "macrolide": ["azithromycin", "clarithromycin", "erythromycin"],
+    "statin": ["atorvastatin", "rosuvastatin", "simvastatin", "pravastatin", "lovastatin"]
+  },
+  "class_aliases": {
+    "penicillins": "penicillin",
+    "sulfa": "sulfonamide",
+    "sulpha": "sulfonamide",
+    "sulfa drugs": "sulfonamide",
+    "nsaids": "nsaid"
+  },
+  "other_known": [
+    "paracetamol", "metformin", "amlodipine", "pantoprazole", "telmisartan", "cefixime", "omeprazole",
+    "cetirizine", "losartan", "atenolol", "glimepiride", "levothyroxine", "ondansetron", "domperidone",
+    "salbutamol", "montelukast", "prednisolone", "insulin"
+  ],
+  "interactions": [
+    {"classes": ["anticoagulant", "nsaid"], "severity": "critical",
+     "effect": "NSAID and anticoagulant combinations are associated with increased bleeding risk."},
+    {"classes": ["nitrate", "pde5_inhibitor"], "severity": "critical",
+     "effect": "Nitrate and PDE5 inhibitor combinations are associated with severe hypotension."},
+    {"classes": ["macrolide", "statin"], "severity": "warning",
+     "effect": "Macrolide and statin combinations are associated with an increased risk of myopathy."},
+    {"classes": ["anticoagulant", "macrolide"], "severity": "warning",
+     "effect": "Macrolide antibiotics are associated with a rise in INR in patients taking anticoagulants."}
+  ],
+  "monitoring": [
+    {"condition": "diabetes", "lab": "hba1c", "label": "HbA1c", "max_age_days": 180}
+  ],
+  "no_allergy_phrases": ["no known drug allergies", "no known allergies", "nkda", "nka", "none"]
+}

@@ -1,0 +1,89 @@
+{
+  "_comment": "Scripted Kanglish consultations. The mock STT returns the segments and the mock LLM returns the note. They double as the scripts to act out when recording the demo audio; have a native Kannada speaker polish the lines first.",
+  "penicillin": {
+    "language": "kn",
+    "segments": [
+      ["SPEAKER_00", "Namaskara Ravi avare, enu problem?"],
+      ["SPEAKER_01", "Doctor, mooru dina inda thumba thale novu, swalpa jwara kooda ide."],
+      ["SPEAKER_00", "Gantalu novu ideya? Any allergy to medicines?"],
+      ["SPEAKER_01", "Gantalu novu ide. Allergy gottilla doctor."],
+      ["SPEAKER_00", "Sari. I am prescribing Amoxicillin 500 mg three times a day for five days, and Paracetamol 650 if there is fever. Bisi neeru kudiri, rest madi."]
+    ],
+    "speaker_roles": {"SPEAKER_00": "doctor", "SPEAKER_01": "patient"},
+    "note": {
+      "chief_complaint": "Headache and fever for 3 days",
+      "symptoms": [
+        {"name": "Headache", "duration": "3 days", "severity": "severe", "notes": null},
+        {"name": "Fever", "duration": "3 days", "severity": "mild", "notes": null},
+        {"name": "Sore throat", "duration": null, "severity": null, "notes": null}
+      ],
+      "relevant_history": [],
+      "allergies_mentioned": [],
+      "prescriptions": [
+        {"drug": "Amoxicillin", "dose": "500 mg", "frequency": "three times a day", "duration": "5 days", "route": "oral"},
+        {"drug": "Paracetamol", "dose": "650 mg", "frequency": "if fever", "duration": null, "route": "oral"}
+      ],
+      "action_items": [{"kind": "advice", "description": "Warm fluids and rest"}],
+      "doctor_assessment": null,
+      "summary": "Ravi reports a severe headache with mild fever and sore throat for 3 days and is not aware of any drug allergy. Amoxicillin and paracetamol were prescribed."
+    }
+  },
+  "warfarin": {
+    "language": "kn",
+    "segments": [
+      ["SPEAKER_00", "Namaskara Lakshmi avare, hegiddira? Enu thondare?"],
+      ["SPEAKER_01", "Doctor, eradu vaara inda mandi novu, mettilu hattuvaaga jaasti aagutte."],
+      ["SPEAKER_00", "Bere yaavudadru maatre thagothira? Any other medicines?"],
+      ["SPEAKER_01", "BP maatre thagothini, adu bittu bere enu illa."],
+      ["SPEAKER_00", "Sari. Brufen 400 bareetini, dinakke eradu sala oota aadmele, five days. Knee exercises maadi."]
+    ],
+    "speaker_roles": {"SPEAKER_00": "doctor", "SPEAKER_01": "patient"},
+    "note": {
+      "chief_complaint": "Knee pain for two weeks",
+      "symptoms": [
+        {"name": "Knee pain", "duration": "2 weeks", "severity": null, "notes": "Worse when climbing stairs"}
+      ],
+      "relevant_history": ["Takes blood pressure tablets; reports no other medicines"],
+      "allergies_mentioned": [],
+      "prescriptions": [
+        {"drug": "Brufen", "dose": "400 mg", "frequency": "twice a day after food", "duration": "5 days", "route": "oral"}
+      ],
+      "action_items": [{"kind": "advice", "description": "Knee exercises"}],
+      "doctor_assessment": null,
+      "summary": "Lakshmi reports knee pain for two weeks, worse when climbing stairs, and says she takes only blood pressure tablets. Brufen 400 mg twice a day after food was prescribed for 5 days."
+    }
+  },
+  "diabetes": {
+    "language": "kn",
+    "segments": [
+      ["SPEAKER_00", "Namaskara Arjun avare, hegiddira? Sugar hege ide?"],
+      ["SPEAKER_01", "Doctor, ee naduve thumba sustu aagtide, baayarike kooda jaasti."],
+      ["SPEAKER_00", "Maatre sariyaagi thagothira? Taking Metformin regularly?"],
+      ["SPEAKER_01", "Haudu doctor, dinakke eradu sala thagothini. Health camp alli cholesterol jaasti ide andru, Atorvastatin 10 kottidru, raatri thagothini."],
+      ["SPEAKER_00", "Sari, continue Metformin 500 twice daily, Atorvastatin 10 raatri continue maadi. Oota control maadi, dina walking maadi. One month nalli follow-up baniri."]
+    ],
+    "speaker_roles": {"SPEAKER_00": "doctor", "SPEAKER_01": "patient"},
+    "note": {
+      "chief_complaint": "Tiredness and increased thirst",
+      "symptoms": [
+        {"name": "Tiredness", "duration": null, "severity": null, "notes": "Recent"},
+        {"name": "Increased thirst", "duration": null, "severity": null, "notes": null}
+      ],
+      "relevant_history": [
+        "Known diabetes; reports taking metformin twice daily",
+        "High cholesterol found at a health camp; started atorvastatin 10 mg at night there"
+      ],
+      "allergies_mentioned": [],
+      "prescriptions": [
+        {"drug": "Metformin", "dose": "500 mg", "frequency": "twice daily", "duration": null, "route": "oral"},
+        {"drug": "Atorvastatin", "dose": "10 mg", "frequency": "once daily at night", "duration": null, "route": "oral"}
+      ],
+      "action_items": [
+        {"kind": "advice", "description": "Diet control and daily walking"},
+        {"kind": "follow_up", "description": "Follow-up in one month"}
+      ],
+      "doctor_assessment": null,
+      "summary": "Arjun reports recent tiredness and increased thirst and says he takes metformin regularly. He was told at a health camp that his cholesterol is high and takes atorvastatin 10 mg at night. Metformin and atorvastatin were continued, with diet and walking advice and a follow-up in one month."
+    }
+  }
+}
