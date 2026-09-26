@@ -1,0 +1,1562 @@
+I am giving you an existing Kaggle .ipynb notebook for a project called:
+
+LUMEN — Clinical Intelligence / Clinical Safety Net
+
+I need you to FIX THE NOTEBOOK, not merely explain what is wrong.
+
+Your final deliverable MUST be a new, complete, runnable .ipynb file that I can upload to Kaggle and run from top to bottom.
+
+Do not just give me code snippets.
+Do not give me pseudocode.
+Do not tell me what I should change manually.
+
+YOU must create the complete corrected notebook.
+
+============================================================
+1. CURRENT ENVIRONMENT
+============================================================
+
+The notebook runs on Kaggle.
+
+Hardware:
+
+- 2 × NVIDIA Tesla T4 GPUs
+- approximately 15 GB usable VRAM per GPU
+- CUDA available
+- Python 3.x
+- Hugging Face Transformers
+- bitsandbytes
+- Accelerate
+
+The model is:
+
+aaditya/Llama3-OpenBioLLM-8B
+
+The model MUST be distributed across BOTH T4 GPUs.
+
+Do not unnecessarily change a working GPU/model-loading architecture.
+
+The previous notebook was able to load the model and perform generation, but the actual clinical analysis architecture is currently poor.
+
+============================================================
+2. THE CURRENT PROBLEM
+============================================================
+
+The current implementation sometimes produces output like:
+
+CLINICAL NOTE
+PATIENT: Understood. What kind of tests do you think we should do?
+
+DOCTOR: We'll start with a chest X-ray...
+
+SYMPTOM REVIEW
+PATIENT: Okay, doctor. What should I expect next?
+
+MEDICATION REVIEW
+PATIENT: Okay, doctor. What do you think might be causing these symptoms?
+
+This is WRONG.
+
+The model is continuing/copying the consultation instead of analyzing it.
+
+The final architecture must NEVER treat the transcript as something to continue.
+
+The model must analyze the consultation.
+
+It must NEVER:
+
+- continue the conversation
+- answer the patient's questions
+- invent dialogue
+- generate PATIENT:/DOCTOR: dialogue as its answer
+- simply copy the transcript
+- convert an undocumented fact into a negative finding
+- invent vitals
+- invent medications
+- invent allergies
+- invent diagnoses
+- invent laboratory results
+- invent examination findings
+- invent patient history
+- invent treatment plans
+- fabricate clinical facts
+
+============================================================
+3. MAIN GOAL
+============================================================
+
+Given ANY reasonably formatted clinical consultation transcript, the system must analyze it and produce a comprehensive structured clinical intelligence report.
+
+Example input:
+
+PATIENT:
+I have had chest pain since yesterday. It gets worse when I walk upstairs.
+
+DOCTOR:
+Where exactly is the pain?
+
+PATIENT:
+It is in the center of my chest and sometimes goes to my left arm. I also feel short of breath.
+
+The system should NOT continue the conversation.
+
+It should extract and analyze the information.
+
+The final output should contain, at minimum:
+
+1. Consultation Summary
+2. Symptoms
+3. Symptom Characteristics
+4. Vital Signs
+5. Relevant Patient / Health Information
+6. Current Medications
+7. Allergies
+8. Clinical Findings
+9. Potential Clinical Risks / Safety Concerns
+10. Red Flags / Urgency Indicators
+11. Missing Information
+12. Contradictions / Inconsistencies
+13. Tests / Investigations Mentioned
+14. Clinical Note
+15. Peer Review
+16. Verification Items / Questions for Clinician
+
+============================================================
+4. VERY IMPORTANT ARCHITECTURE CHANGE
+============================================================
+
+DO NOT implement this as:
+
+Transcript → four independent prose prompts → four outputs
+
+Instead implement a multi-stage architecture:
+
+                    ┌─────────────────────┐
+                    │ Consultation        │
+                    │ Transcript          │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                  ┌─────────────────────────┐
+                  │ Stage 1: FACT           │
+                  │ EXTRACTION              │
+                  │                         │
+                  │ symptoms                │
+                  │ vitals                  │
+                  │ medications             │
+                  │ allergies               │
+                  │ history                 │
+                  │ findings                │
+                  │ tests                   │
+                  │ plans                   │
+                  │ contradictions          │
+                  └────────────┬────────────┘
+                               │
+                               ▼
+                  ┌─────────────────────────┐
+                  │ Stage 2: CLINICAL       │
+                  │ ANALYSIS                │
+                  │                         │
+                  │ risks                   │
+                  │ red flags               │
+                  │ missing information     │
+                  │ urgency indicators      │
+                  │ verification items      │
+                  └────────────┬────────────┘
+                               │
+                               ▼
+                  ┌─────────────────────────┐
+                  │ Stage 3: REPORT         │
+                  │ GENERATION              │
+                  │                         │
+                  │ Summary                 │
+                  │ Clinical Note           │
+                  │ Symptom Review          │
+                  │ Medication Review       │
+                  │ Peer Review             │
+                  └─────────────────────────┘
+
+The purpose of this architecture is to prevent the model from simply
+continuing the transcript.
+
+============================================================
+5. SOURCE SEPARATION
+============================================================
+
+The architecture must support three separate information sources:
+
+A. CONSULTATION TRANSCRIPT
+
+This is what was actually said during the consultation.
+
+B. PATIENT HISTORY
+
+This is historical information retrieved from PostgreSQL / memory / future RAG.
+
+C. RETRIEVED CONTEXT
+
+This will eventually contain relevant information retrieved from a medical knowledge base or RAG system.
+
+Create variables such as:
+
+transcript = ""
+patient_history = ""
+retrieved_context = ""
+
+The notebook must clearly label these sources.
+
+CRITICAL:
+
+The model must NEVER treat retrieved medical knowledge as if it were something the patient said.
+
+The model must NEVER treat general medical knowledge as patient-specific evidence.
+
+Patient-specific facts must be traceable to:
+
+- transcript
+- patient history
+- explicitly supplied context
+
+============================================================
+6. POSTGRESQL
+============================================================
+
+We are using PostgreSQL for patient data / history.
+
+Do NOT create a fake database inside this notebook.
+
+Instead design the architecture so that later the backend can provide:
+
+patient_history
+
+and optionally:
+
+retrieved_context
+
+as strings or structured JSON.
+
+The notebook should work even if both are empty.
+
+Example:
+
+patient_history = ""
+
+retrieved_context = ""
+
+The inference pipeline must still run correctly.
+
+============================================================
+7. REQUIRED INFORMATION EXTRACTION
+============================================================
+
+Stage 1 must extract ALL clinically relevant information present in the consultation.
+
+Do NOT only extract symptoms.
+
+Extract:
+
+------------------------------------------------------------
+SYMPTOMS
+------------------------------------------------------------
+
+For EVERY symptom mentioned, capture:
+
+- symptom name
+- location
+- onset
+- duration
+- frequency
+- severity
+- character
+- radiation
+- aggravating factors
+- relieving factors
+- associated symptoms
+- temporal pattern
+- whether improving/worsening/stable
+- whether explicitly denied
+- source
+
+Example:
+
+Symptom:
+Chest pain
+
+Location:
+Central chest
+
+Duration:
+Since yesterday
+
+Aggravating factor:
+Walking upstairs
+
+Radiation:
+Left arm
+
+Associated symptoms:
+Shortness of breath
+
+Source:
+Patient statement
+
+If information is not present:
+
+"Not documented"
+
+NEVER infer it.
+
+------------------------------------------------------------
+VITAL SIGNS
+------------------------------------------------------------
+
+Extract if present:
+
+- blood pressure
+- heart rate / pulse
+- respiratory rate
+- oxygen saturation
+- temperature
+- blood glucose
+- weight
+- height
+- other vitals
+
+For each:
+
+value
+unit
+time/context
+source
+
+If absent:
+
+"Not documented"
+
+NEVER invent values.
+
+VERY IMPORTANT:
+
+"Not documented"
+
+is NOT the same as:
+
+"Normal"
+
+and is NOT the same as:
+
+"Negative".
+
+------------------------------------------------------------
+MEDICATIONS
+------------------------------------------------------------
+
+Extract:
+
+- medication name
+- dose if explicitly stated
+- frequency if explicitly stated
+- route if stated
+- indication if stated
+- current / stopped / planned
+- source
+
+Do NOT invent dosage.
+
+------------------------------------------------------------
+ALLERGIES
+------------------------------------------------------------
+
+Extract:
+
+- allergen
+- reaction
+- severity if explicitly stated
+
+If not mentioned:
+
+"Not documented"
+
+Do NOT assume "No known allergies."
+
+------------------------------------------------------------
+MEDICAL HISTORY
+------------------------------------------------------------
+
+Extract:
+
+- previous diagnoses
+- chronic conditions
+- surgeries
+- previous hospitalizations
+- relevant family history
+- social history
+- smoking
+- alcohol
+- relevant exposures
+- pregnancy status if explicitly relevant and documented
+- previous similar episodes
+
+Again:
+
+ONLY information explicitly available.
+
+------------------------------------------------------------
+CLINICAL FINDINGS
+------------------------------------------------------------
+
+Extract:
+
+- physical examination findings
+- imaging findings
+- laboratory findings
+- ECG findings
+- other investigations
+
+Do not generate findings that were not stated.
+
+------------------------------------------------------------
+TESTS / INVESTIGATIONS
+------------------------------------------------------------
+
+Separate:
+
+COMPLETED TESTS
+
+from:
+
+PLANNED / RECOMMENDED TESTS
+
+For example:
+
+Chest X-ray planned
+
+must NOT become:
+
+Chest X-ray performed and normal.
+
+============================================================
+8. EXPLICITLY DENIED VS NOT DOCUMENTED
+============================================================
+
+This distinction is mandatory.
+
+Example:
+
+PATIENT:
+I don't have fever.
+
+Correct:
+
+Fever:
+Explicitly denied.
+
+If the transcript simply never mentions fever:
+
+Fever:
+Not documented.
+
+NEVER convert absence of mention into a negative finding.
+
+============================================================
+9. PLANNED VS COMPLETED
+============================================================
+
+This distinction is mandatory.
+
+If doctor says:
+
+"We will order a chest X-ray."
+
+Output:
+
+Chest X-ray:
+Planned / recommended.
+
+NOT:
+
+Chest X-ray:
+Performed.
+
+If the transcript says:
+
+"The chest X-ray showed..."
+
+then it is completed.
+
+============================================================
+10. CLINICAL SUMMARY
+============================================================
+
+Generate a concise but clinically useful summary.
+
+It should answer:
+
+- Why did the patient present?
+- What are the major symptoms?
+- What relevant history exists?
+- What important findings exist?
+- What investigations have been done/planned?
+- What is the current documented plan?
+
+Do NOT invent a diagnosis.
+
+============================================================
+11. POTENTIAL RISKS / SAFETY CONCERNS
+============================================================
+
+This is one of the MOST IMPORTANT components.
+
+The system must identify potentially important clinical safety concerns based on the documented information.
+
+Examples of categories include:
+
+- possible acute deterioration indicators
+- medication-related safety concerns
+- allergy-related concerns
+- drug interaction concerns
+- abnormal vital signs
+- concerning symptom combinations
+- severe/worsening symptoms
+- missing critical information
+- contradictions
+- delayed evaluation concerns
+- documented risk factors
+- potentially urgent symptoms
+
+The system must distinguish:
+
+DOCUMENTED FACT
+
+from:
+
+POTENTIAL CONCERN
+
+from:
+
+WHAT TO VERIFY
+
+For example:
+
+DOCUMENTED FACT:
+Patient reports chest pain radiating to the left arm with shortness of breath.
+
+POTENTIAL CONCERN:
+This symptom combination may represent a clinically significant acute condition and warrants clinician assessment.
+
+WHAT TO VERIFY:
+Confirm onset, severity, current status, vital signs, associated symptoms, and relevant history.
+
+Do NOT present an unconfirmed diagnosis as a fact.
+
+Do NOT prescribe medication.
+
+Do NOT give medication doses.
+
+Do NOT autonomously make treatment decisions.
+
+============================================================
+12. HIGH-RISK CONDITIONS
+============================================================
+
+The current system only checks medication risks.
+
+That is insufficient.
+
+The system must also look for documented patterns that may require clinician attention.
+
+Examples of high-risk patterns may include:
+
+- chest pain with concerning associated symptoms
+- severe shortness of breath
+- altered consciousness
+- new neurological deficits
+- severe allergic reaction features
+- severe bleeding
+- signs suggestive of severe infection
+- very abnormal documented vital signs
+- severe hypoglycemia/hyperglycemia when values are explicitly present
+- rapidly worsening symptoms
+- severe abdominal symptoms
+- pregnancy-related red flags when pregnancy is explicitly documented
+- medication toxicity concerns
+- significant drug-allergy conflicts
+- anticoagulant-related bleeding concerns
+
+IMPORTANT:
+
+The model must NOT diagnose these conditions.
+
+It should say something like:
+
+"Potential safety concern requiring clinician verification."
+
+or:
+
+"Documented features may warrant urgent clinical assessment."
+
+The system must clearly separate evidence from interpretation.
+
+============================================================
+13. URGENCY / TIMELY MEDICAL ATTENTION
+============================================================
+
+Create an explicit section:
+
+URGENCY / ATTENTION INDICATORS
+
+Possible values:
+
+- No urgency indicator documented
+- Routine clinician review
+- Prompt clinician review
+- Urgent clinician assessment indicated by documented red flags
+
+Do NOT create a definitive autonomous triage decision.
+
+The output must explain WHY an urgency indicator was generated.
+
+Example:
+
+LEVEL:
+Prompt clinician review
+
+EVIDENCE:
+Patient reports worsening shortness of breath.
+
+REASON:
+Worsening respiratory symptoms may require timely clinical assessment.
+
+WHAT TO VERIFY:
+Current oxygen saturation, respiratory rate, severity, onset, and associated symptoms.
+
+Again, do not invent values.
+
+============================================================
+14. MISSING INFORMATION
+============================================================
+
+This is extremely important.
+
+The system must identify clinically relevant information that is missing.
+
+For example, if a patient presents with respiratory symptoms but there is no:
+
+- oxygen saturation
+- respiratory rate
+- temperature
+- smoking history
+- medication history
+
+the system should say:
+
+MISSING INFORMATION
+
+- Oxygen saturation: not documented
+- Respiratory rate: not documented
+- Temperature: not documented
+- Smoking history: not documented
+- Current medications: not documented
+
+Do NOT pretend these are normal.
+
+============================================================
+15. CONTRADICTIONS / INCONSISTENCIES
+============================================================
+
+Detect contradictions such as:
+
+Patient:
+"I have no fever."
+
+Later:
+"I've had fever for three days."
+
+Or:
+
+Medication list says:
+No anticoagulants.
+
+Later:
+Patient says:
+"I take warfarin."
+
+The system should identify:
+
+CONTRADICTION
+
+and quote/reference the conflicting facts briefly.
+
+Do not silently choose one version.
+
+Also detect:
+
+- conflicting dates
+- conflicting medication status
+- conflicting symptom duration
+- conflicting diagnoses
+- conflicting test results
+- speaker attribution uncertainty
+
+============================================================
+16. SPEAKER DIARIZATION
+============================================================
+
+The transcript may come from Whisper/WhisperX and speaker labels may be imperfect.
+
+Possible labels:
+
+[DOCTOR]
+[PATIENT]
+SPEAKER_00
+SPEAKER_01
+
+Do NOT blindly trust labels when the conversational content contradicts them.
+
+If attribution is uncertain:
+
+"Speaker attribution uncertain."
+
+Do not silently convert an uncertain statement into a patient fact.
+
+============================================================
+17. CLINICAL NOTE
+============================================================
+
+Generate a structured clinical note.
+
+Use:
+
+SUBJECTIVE
+
+OBJECTIVE
+
+ASSESSMENT
+
+PLAN
+
+But the note must ONLY contain information supported by:
+
+- transcript
+- patient history
+- explicitly supplied clinical context
+
+Do not invent information.
+
+Do not turn possibilities into diagnoses.
+
+Do not write a dialogue.
+
+Do not answer the patient.
+
+============================================================
+18. SYMPTOM REVIEW
+============================================================
+
+Generate:
+
+SYMPTOMS DOCUMENTED
+
+For EVERY symptom.
+
+Then:
+
+SYMPTOM CHARACTERISTICS
+
+POTENTIAL CLINICAL CONCERNS
+
+RED FLAGS / URGENCY INDICATORS
+
+MISSING INFORMATION
+
+CONTRADICTIONS
+
+WHAT TO VERIFY
+
+This section must comprehensively cover all symptoms in the transcript.
+
+============================================================
+19. MEDICATION REVIEW
+============================================================
+
+Generate:
+
+CURRENT MEDICATIONS
+
+MEDICATION STATUS
+
+ALLERGIES
+
+MEDICATION-RELATED FACTS
+
+POTENTIAL MEDICATION SAFETY CONCERNS
+
+POSSIBLE ALLERGY CONCERNS
+
+POSSIBLE INTERACTION CONCERNS
+
+MISSING MEDICATION INFORMATION
+
+WHAT TO VERIFY
+
+Do not prescribe.
+
+Do not recommend dosage changes.
+
+Do not invent drug interactions.
+
+Only identify a potential issue and state that it requires clinician verification.
+
+============================================================
+20. PEER REVIEW
+============================================================
+
+Create a clinical peer-review style section.
+
+Use:
+
+RELEVANT HISTORY
+
+KEY CLINICAL FINDINGS
+
+IMPORTANT SYMPTOMS
+
+SAFETY CONCERNS
+
+POTENTIAL HIGH-RISK FEATURES
+
+MISSING INFORMATION
+
+CONTRADICTIONS
+
+INVESTIGATIONS
+
+DOCUMENTED PLAN
+
+WHAT SHOULD BE VERIFIED
+
+URGENCY / ATTENTION INDICATORS
+
+The peer review should behave like a second-pass safety check of the documentation.
+
+It should NOT replace a doctor.
+
+============================================================
+21. OUTPUT ARCHITECTURE
+============================================================
+
+I want the final Python result to be structured.
+
+For example:
+
+result = {
+    "summary": {...},
+    "symptoms": [...],
+    "vitals": [...],
+    "health_information": {...},
+    "medications": [...],
+    "allergies": [...],
+    "clinical_findings": [...],
+    "investigations": [...],
+    "potential_risks": [...],
+    "urgency_indicators": {...},
+    "missing_information": [...],
+    "contradictions": [...],
+    "clinical_note": {...},
+    "symptom_review": {...},
+    "medication_review": {...},
+    "peer_review": {...},
+    "verification_items": [...]
+}
+
+The notebook should pretty-print this into a readable:
+
+============================================================
+LUMEN CLINICAL INTELLIGENCE REPORT
+============================================================
+
+SUMMARY
+...
+
+SYMPTOMS
+...
+
+VITAL SIGNS
+...
+
+RELEVANT HEALTH INFORMATION
+...
+
+MEDICATION REVIEW
+...
+
+ALLERGIES
+...
+
+CLINICAL FINDINGS
+...
+
+INVESTIGATIONS
+...
+
+POTENTIAL RISKS / SAFETY CONCERNS
+...
+
+URGENCY / ATTENTION INDICATORS
+...
+
+MISSING INFORMATION
+...
+
+CONTRADICTIONS
+...
+
+CLINICAL NOTE
+...
+
+PEER REVIEW
+...
+
+============================================================
+END OF LUMEN REPORT
+============================================================
+
+============================================================
+22. MODEL INFERENCE
+============================================================
+
+Use the model correctly as a Llama-3 instruct model.
+
+Do NOT pass a BatchEncoding incorrectly into model.generate().
+
+Do NOT do:
+
+model.generate(inputs)
+
+if inputs is a BatchEncoding.
+
+Use the proper:
+
+model.generate(
+    input_ids=...,
+    attention_mask=...
+)
+
+or:
+
+model.generate(**inputs)
+
+as appropriate.
+
+Use the tokenizer's existing chat template if available:
+
+tokenizer.apply_chat_template(
+    messages,
+    tokenize=True,
+    add_generation_prompt=True,
+    return_tensors="pt"
+)
+
+Do NOT blindly overwrite tokenizer.chat_template.
+
+If the tokenizer does not have the required template, handle this explicitly and safely.
+
+Decode ONLY newly generated tokens.
+
+Do NOT decode the entire prompt as the output.
+
+============================================================
+23. GENERATION SETTINGS
+============================================================
+
+Use deterministic generation initially:
+
+do_sample=False
+
+Use reasonable max_new_tokens values.
+
+Do NOT use unnecessarily huge values such as 2000+ unless absolutely necessary.
+
+Use separate calls for extraction and analysis if required.
+
+============================================================
+24. MODEL QUANTIZATION
+============================================================
+
+The model must fit reliably on the two T4 GPUs.
+
+Preferred:
+
+8-bit BitsAndBytes quantization.
+
+Support:
+
+8-bit
+
+and
+
+4-bit NF4 fallback.
+
+Make this configurable:
+
+QUANTIZATION = "8bit"
+
+Allowed:
+
+"8bit"
+"4bit"
+
+Do NOT use FP16 if it causes generation-time OOM.
+
+The model MUST be sharded across the two T4 GPUs.
+
+Use:
+
+device_map="auto"
+
+and verify:
+
+model.hf_device_map
+
+After loading, print:
+
+- GPU names
+- GPU count
+- total VRAM
+- model device map
+- number of model layers/modules on each GPU
+- allocated VRAM
+- reserved VRAM
+
+If the model is accidentally placed entirely on one GPU, fail clearly instead of silently continuing.
+
+If implementing automatic 8-bit → 4-bit fallback:
+
+1. delete the existing model
+2. run gc.collect()
+3. torch.cuda.empty_cache()
+4. torch.cuda.ipc_collect() where supported
+5. load the model again using 4-bit
+
+Do not leave two model copies in memory.
+
+============================================================
+25. MEMORY SAFETY
+============================================================
+
+The notebook must be restart-safe and memory-conscious.
+
+Before model loading:
+
+- check CUDA
+- check GPU count
+- clear cache
+- print available VRAM
+
+After model loading:
+
+- print memory usage
+- print device map
+
+Before generation:
+
+- clear unnecessary tensors
+- do not keep previous generations in GPU memory
+- use inference mode / no_grad appropriately
+
+After generation:
+
+- release temporary tensors where appropriate
+- clear cache if necessary
+
+Do NOT repeatedly reload the model.
+
+The model should be loaded exactly once per notebook run unless a quantization fallback is explicitly required.
+
+============================================================
+26. INPUT LENGTH
+============================================================
+
+Clinical transcripts can become long.
+
+Implement safe input handling.
+
+Check:
+
+input_token_count
+
+against:
+
+tokenizer.model_max_length
+
+Do not blindly feed excessively long transcripts.
+
+If truncation is required, preserve the most clinically relevant information where possible.
+
+Prefer a structured chunking approach for very long consultations rather than simply truncating the beginning or end.
+
+If implementing chunking:
+
+1. extract facts from chunks
+2. merge the structured facts
+3. perform final analysis over the merged facts
+
+Do NOT independently produce four final reports for every chunk and then concatenate them.
+
+============================================================
+27. JSON / STRUCTURED OUTPUT RELIABILITY
+============================================================
+
+If you ask the LLM for JSON, do NOT assume it will always return valid JSON.
+
+Implement robust parsing.
+
+The notebook should:
+
+1. generate structured output
+2. extract the JSON
+3. validate it
+4. if invalid, perform a controlled repair/retry
+5. validate again
+6. if still invalid, return a clear error rather than corrupt data
+
+Use Pydantic/dataclasses where useful.
+
+Do NOT silently convert malformed model output into fake valid data.
+
+If free-form generation is more reliable for a specific section, use controlled structured text and parse it safely.
+
+The priority is correctness and robustness.
+
+============================================================
+28. MULTI-STAGE REASONING
+============================================================
+
+I want the architecture to separate:
+
+FACT EXTRACTION
+
+from:
+
+CLINICAL ANALYSIS
+
+from:
+
+REPORT GENERATION.
+
+For example:
+
+STAGE 1:
+
+Transcript
+→ structured documented facts
+
+STAGE 2:
+
+Structured facts + patient history + retrieved context
+→ safety analysis
+
+STAGE 3:
+
+Structured facts + safety analysis
+→ human-readable report
+
+This should prevent the model from drifting into conversational continuation.
+
+============================================================
+29. TESTING
+============================================================
+
+Do NOT only test one respiratory transcript.
+
+Create a built-in test suite with several synthetic clinical scenarios.
+
+At minimum include:
+
+TEST 1:
+Respiratory complaint
+
+TEST 2:
+Chest pain / cardiovascular red flags
+
+TEST 3:
+Abdominal complaint
+
+TEST 4:
+Neurological complaint
+
+TEST 5:
+Infection / fever scenario
+
+TEST 6:
+Medication / allergy scenario
+
+TEST 7:
+Chronic disease scenario
+
+TEST 8:
+Scenario with abnormal vital signs
+
+TEST 9:
+Scenario where vital signs are completely absent
+
+TEST 10:
+Scenario with contradictory statements
+
+TEST 11:
+Scenario where tests are planned but not completed
+
+TEST 12:
+Scenario with very little information
+
+TEST 13:
+Scenario where there are no medications
+
+TEST 14:
+Scenario where allergies are explicitly denied
+
+TEST 15:
+Scenario where allergies are not mentioned
+
+For each test verify that the system:
+
+- extracts symptoms
+- does not invent facts
+- distinguishes not documented from negative
+- extracts vitals when present
+- identifies missing vitals when absent
+- extracts medications
+- extracts allergies
+- identifies potential safety concerns
+- identifies possible red flags
+- identifies missing information
+- identifies contradictions
+- distinguishes planned vs completed tests
+- produces a clinical summary
+- produces a clinical note
+- produces peer review
+- does not continue the dialogue
+
+============================================================
+30. QUALITY CHECKS
+============================================================
+
+Implement automatic sanity checks on the output.
+
+For example:
+
+FAIL if final output contains obvious dialogue continuation such as:
+
+"PATIENT:"
+"DOCTOR:"
+
+unless these appear only inside a clearly labelled evidence/source field.
+
+FAIL if the output simply reproduces the entire transcript.
+
+Check that the output contains the required sections.
+
+Check that missing vitals are represented as "Not documented" when appropriate.
+
+Check that no fabricated vital signs appear.
+
+Check that medications are not invented.
+
+Check that the system does not create a diagnosis when the transcript does not establish one.
+
+These checks should be warnings/errors, not a fake way of guaranteeing correctness.
+
+============================================================
+31. MEDICAL SAFETY
+============================================================
+
+This is a clinical support system.
+
+It is NOT an autonomous diagnostic system.
+
+The model must:
+
+- identify documented facts
+- identify possible concerns
+- identify missing information
+- identify contradictions
+- identify items requiring clinician verification
+
+It must NOT:
+
+- independently diagnose the patient
+- prescribe medication
+- recommend drug dosages
+- replace clinician judgment
+- invent clinical findings
+- claim certainty where the evidence is uncertain
+
+Use language such as:
+
+"Potential concern"
+"May warrant verification"
+"Documented finding"
+"Not documented"
+"Requires clinician assessment"
+
+instead of presenting uncertain conclusions as established diagnoses.
+
+============================================================
+32. RAG READINESS
+============================================================
+
+Do NOT build a fake medical RAG database.
+
+But design the code so that later we can add:
+
+retrieved_context
+
+from ChromaDB / another retrieval system.
+
+The architecture should make it obvious where retrieved context enters.
+
+The model must distinguish:
+
+PATIENT-SPECIFIC EVIDENCE
+
+from:
+
+GENERAL MEDICAL KNOWLEDGE.
+
+============================================================
+33. API READINESS
+============================================================
+
+Do NOT implement ngrok/FastAPI unless necessary.
+
+The immediate objective is a reliable notebook.
+
+However, structure the main pipeline as a reusable function:
+
+analyze_consultation(
+    transcript,
+    patient_history="",
+    retrieved_context=""
+)
+
+returning:
+
+result
+
+This function will later be exposed through an API.
+
+Make sure the result is JSON-serializable.
+
+============================================================
+34. IMPORTANT: DO NOT BREAK WORKING MODEL LOADING
+============================================================
+
+Before modifying anything, inspect the existing notebook.
+
+Determine:
+
+- what already works
+- how the model is loaded
+- how the two GPUs are used
+- what packages are installed
+- what generation method is currently being used
+
+Preserve working components where appropriate.
+
+Fix the architecture rather than randomly changing everything.
+
+If a different model-loading method is genuinely necessary, explain it in a notebook markdown cell and implement it completely.
+
+============================================================
+35. NOTEBOOK STRUCTURE
+============================================================
+
+The final .ipynb should be organized approximately as:
+
+CELL 1
+Title / architecture explanation
+
+CELL 2
+Install / dependency verification
+
+CELL 3
+CUDA + GPU diagnostics
+
+CELL 4
+Hugging Face authentication check
+
+CELL 5
+Configuration
+
+CELL 6
+Tokenizer loading
+
+CELL 7
+Quantized model loading
+
+CELL 8
+Verify 2-GPU model sharding
+
+CELL 9
+VRAM diagnostics
+
+CELL 10
+Llama-3 chat-template verification
+
+CELL 11
+Core safe generation function
+
+CELL 12
+Structured fact extraction prompt/schema
+
+CELL 13
+Clinical analysis prompt/schema
+
+CELL 14
+Report generation functions
+
+CELL 15
+Main analyze_consultation() pipeline
+
+CELL 16
+Sample respiratory test
+
+CELL 17
+Full test suite
+
+CELL 18
+Final example report
+
+Keep the notebook readable.
+
+Use markdown explanations between major stages.
+
+============================================================
+36. MOST IMPORTANT FUNCTION
+============================================================
+
+Create:
+
+analyze_consultation(
+    transcript,
+    patient_history="",
+    retrieved_context=""
+)
+
+This must be the main entry point.
+
+Example:
+
+result = analyze_consultation(
+    transcript=consultation_transcript,
+    patient_history=patient_history,
+    retrieved_context=retrieved_context
+)
+
+print_lumen_report(result)
+
+This is the interface that we will eventually connect to our backend.
+
+============================================================
+37. FINAL OUTPUT
+============================================================
+
+Your task is COMPLETE only when you have actually generated:
+
+clinical_safety_net_fixed.ipynb
+
+The notebook must be a real Jupyter notebook.
+
+It must contain executable cells.
+
+It must not contain placeholder code such as:
+
+...
+
+TODO
+
+YOUR_CODE_HERE
+
+IMPLEMENT_THIS
+
+fake model IDs
+
+fake API calls
+
+or incomplete functions.
+
+============================================================
+38. FINAL VALIDATION BEFORE YOU GIVE ME THE FILE
+============================================================
+
+Before returning the notebook:
+
+1. Check that the notebook JSON is valid.
+2. Check that every Python code cell is syntactically valid.
+3. Check imports.
+4. Check that model ID is exactly:
+
+aaditya/Llama3-OpenBioLLM-8B
+
+5. Check that quantization configuration is internally consistent.
+6. Check that device_map is appropriate.
+7. Check that generation does not pass BatchEncoding incorrectly.
+8. Check that chat template handling is correct.
+9. Check that output decoding removes the prompt.
+10. Check that all four major analytical components exist.
+11. Check that symptoms are comprehensively extracted.
+12. Check that vitals are extracted when present.
+13. Check that missing vitals are identified when absent.
+14. Check medication extraction.
+15. Check allergy extraction.
+16. Check relevant health history.
+17. Check risk/safety analysis.
+18. Check urgency indicators.
+19. Check missing information.
+20. Check contradictions.
+21. Check clinical summary.
+22. Check clinical note.
+23. Check peer review.
+24. Check verification items.
+25. Check that the system does not continue the dialogue.
+26. Check that the result is JSON serializable.
+27. Check that the main function accepts arbitrary transcripts.
+28. Check that patient_history and retrieved_context are optional.
+29. Check that no fake medical data is silently generated.
+30. Check that the notebook is actually saved as an .ipynb file.
+
+Do not tell me "this should work."
+
+Actually construct the notebook so that I can download it and run it.
+
+============================================================
+FINAL REQUIREMENT
+============================================================
+
+I care more about a CORRECT ARCHITECTURE than preserving the old implementation.
+
+If the existing prompt architecture is fundamentally wrong, replace it.
+
+If the existing generation function is wrong, replace it.
+
+If four separate prompts are inferior to a structured multi-stage pipeline, implement the multi-stage pipeline.
+
+If structured extraction followed by analysis is more reliable than directly generating a SOAP note, use structured extraction first.
+
+The final system must be designed around this principle:
+
+                    TRANSCRIPT
+                         ↓
+               FACT EXTRACTION
+                         ↓
+             CLINICAL INFORMATION
+                         ↓
+              SAFETY / RISK ANALYSIS
+                         ↓
+              CLINICAL REPORTING
+                         ↓
+                STRUCTURED RESULT
+
+The system should work across different consultation types rather than being tuned only for one respiratory example.
+
+Generate the completed .ipynb file now.
