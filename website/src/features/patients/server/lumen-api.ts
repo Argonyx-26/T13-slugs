@@ -9,6 +9,9 @@ import 'server-only';
 // ============================================================
 
 import type {
+  AddClinicRecordInput,
+  CheckInInput,
+  CheckInResult,
   Fact,
   HistoryEntry,
   LabResult,
@@ -16,7 +19,11 @@ import type {
   PatientProfile,
   PatientRecord,
   Prediction,
+  PossibleDuplicate,
   QAAnswer,
+  RegisterPatientInput,
+  RegisterPatientResult,
+  RetractClinicRecordInput,
   RiskItem,
   Sex,
   Source,
@@ -45,7 +52,9 @@ export class LumenApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
-    message: string
+    message: string,
+    /** The error body's extra fields, e.g. `matches` on a 409 POSSIBLE_DUPLICATE */
+    readonly details: Record<string, unknown> = {}
   ) {
     super(message);
   }
@@ -111,12 +120,13 @@ async function call<T>(path: string, init: RequestInit = {}, timeoutMs = 20_000)
   if (!res.ok) {
     // The orchestrator's single error shape: {"error": {"code", "message", "stage"}}
     const body = (await res.json().catch(() => null)) as {
-      error?: { code?: string; message?: string };
+      error?: { code?: string; message?: string } & Record<string, unknown>;
     } | null;
     throw new LumenApiError(
       res.status,
       body?.error?.code ?? `HTTP_${res.status}`,
-      body?.error?.message ?? 'The clinic server returned an error.'
+      body?.error?.message ?? 'The clinic server returned an error.',
+      body?.error ?? {}
     );
   }
   return (await res.json()) as T;
@@ -340,6 +350,8 @@ export const lumenApi = {
       },
       risks: toRisks(report),
       history: composeHistory(profile, notes),
+      // The orchestrator doesn't serve files yet
+      documents: [],
       disclaimer: report?.disclaimer ?? DISCLAIMER
     };
   },
@@ -350,5 +362,57 @@ export const lumenApi = {
       { method: 'POST', body: JSON.stringify({ question }) },
       90_000
     );
+  },
+
+  // ---------- Clinic tier writes (docs/clinic-api.md) ----------
+
+  /** POST /patients. 409 POSSIBLE_DUPLICATE carries `matches` for the desk to check. */
+  async registerPatient(input: RegisterPatientInput): Promise<RegisterPatientResult> {
+    try {
+      const out = await call<{ patient_uuid: string; display_code: string; token: number | null }>(
+        '/patients',
+        { method: 'POST', body: JSON.stringify(input) }
+      );
+      return { status: 'registered', patient_id: out.patient_uuid, ...out };
+    } catch (e) {
+      if (e instanceof LumenApiError && e.code === 'POSSIBLE_DUPLICATE') {
+        const matches = (e.details.matches ?? []) as (Omit<PossibleDuplicate, 'patient_id'> & {
+          patient_uuid: string;
+        })[];
+        return {
+          status: 'possible_duplicate',
+          matches: matches.map(({ patient_uuid, ...m }) => ({ patient_id: patient_uuid, ...m }))
+        };
+      }
+      throw e;
+    }
+  },
+
+  /** POST /visits, then POST /visits/{visit_id}/vitals when the desk took vital signs or a complaint */
+  async checkIn(input: CheckInInput): Promise<CheckInResult> {
+    const visit = await call<{ visit_id: string; token: number }>('/visits', {
+      method: 'POST',
+      body: JSON.stringify({ patient_uuid: input.patient_id })
+    });
+    if (!input.vitals && !input.complaint.length) return { token: visit.token, assessment: null };
+    const assessment = await call<TriageAssessment>(`/visits/${visit.visit_id}/vitals`, {
+      method: 'POST',
+      body: JSON.stringify({ vitals: input.vitals, complaint: input.complaint })
+    });
+    return { token: visit.token, assessment };
+  },
+
+  /** POST /patients/{id}/records: append-only */
+  addRecord(input: AddClinicRecordInput): Promise<{ record_id: string }> {
+    const { patient_id, ...body } = input;
+    return call(`/patients/${patient_id}/records`, { method: 'POST', body: JSON.stringify(body) });
+  },
+
+  /** POST /records/{record_id}/retract */
+  async retractRecord(input: RetractClinicRecordInput): Promise<void> {
+    await call(`/records/${input.record_id}/retract`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: input.reason, note: input.note })
+    });
   }
 };

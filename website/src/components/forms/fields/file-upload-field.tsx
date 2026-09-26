@@ -1,6 +1,6 @@
 'use client';
 
-import { FileUploader } from '@/components/file-uploader';
+import { FileUploader, type FileUploaderProps } from '@/components/file-uploader';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { useFieldContext, useFieldInvalid, type BaseFieldProps } from '@/lib/form-context';
 
@@ -9,10 +9,12 @@ export function FileUploadField({
   description,
   required,
   maxSize = 5 * 1024 * 1024,
-  maxFiles = 1
+  maxFiles = 1,
+  accept
 }: BaseFieldProps & {
   maxSize?: number;
   maxFiles?: number;
+  accept?: FileUploaderProps['accept'];
 }) {
   const field = useFieldContext<File[] | undefined>();
   const isInvalid = useFieldInvalid();
@@ -30,6 +32,7 @@ export function FileUploadField({
         }
         maxSize={maxSize}
         maxFiles={maxFiles}
+        accept={accept}
       />
       {description && <FieldDescription>{description}</FieldDescription>}
       {isInvalid && <FieldError id={`${field.name}-error`} errors={field.state.meta.errors} />}

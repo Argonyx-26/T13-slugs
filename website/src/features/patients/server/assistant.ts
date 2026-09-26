@@ -1,8 +1,8 @@
 import 'server-only';
 
-import { fakePatients } from '@/constants/mock-api-patients';
 import type { DataSource, QAAnswer } from '../api/types';
 import { answerFromRecord } from '../utils/record-assistant';
+import { demoClinic } from './demo-clinic';
 import { LumenApiError, isLumenApiConfigured, lumenApi } from './lumen-api';
 
 /** One question about one patient. The orchestrator's local LLM when configured, else the record lookup. */
@@ -13,7 +13,7 @@ export async function answerQuestion(
   if (isLumenApiConfigured()) {
     return { answer: await lumenApi.ask(patientId, question), source: 'fastapi' };
   }
-  const patient = await fakePatients.getPatientById(patientId);
+  const patient = await demoClinic.getPatientById(patientId);
   if (!patient) throw new LumenApiError(404, 'PATIENT_NOT_FOUND', 'Unknown patient.');
   return { answer: answerFromRecord(patient, question), source: 'demo' };
 }

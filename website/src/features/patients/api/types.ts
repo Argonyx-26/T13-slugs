@@ -25,6 +25,8 @@ export interface Fact {
   source: Source;
   recorded_on: string | null;
   note?: string | null;
+  /** The clinic_records row behind this fact, when known: lets the clinic correct it */
+  record_id?: string | null;
 }
 
 export interface LabResult {
@@ -32,6 +34,7 @@ export interface LabResult {
   value: string;
   taken_on: string;
   source: Source;
+  record_id?: string | null;
 }
 
 export interface Evidence {
@@ -62,6 +65,23 @@ export interface HistoryEntry {
   text: string;
   source: Source;
   recorded_on: string | null;
+}
+
+export type DocumentKind = 'xray' | 'lab_report' | 'ecg' | 'prescription' | 'scan' | 'photo';
+
+/** A file on the patient's record: a scan, report or photo */
+export interface PatientDocument {
+  id: string;
+  title: string;
+  kind: DocumentKind;
+  /** Image URL */
+  src: string;
+  recorded_on: string | null;
+  source: Source;
+  /** One line on what the file shows */
+  description: string;
+  /** Added through the dashboard's upload button */
+  uploaded?: boolean;
 }
 
 /** POST /patients/{id}/ask. Opinion and diagnosis questions come back refused. */
@@ -173,6 +193,8 @@ export interface PatientRecord extends PatientCard {
   risks: RiskItem[];
   /** Newest first */
   history: HistoryEntry[];
+  /** Scans, reports and photos, newest first */
+  documents: PatientDocument[];
   disclaimer: string;
 }
 
@@ -188,6 +210,72 @@ export interface PatientByIdResponse {
   patient: PatientRecord | null;
   source: DataSource;
 }
+
+// ---------- Clinic tier writes: reception desk and record corrections ----------
+// Mirrors backend/sql (sanjana-rag): clinic_records is append-only; a wrong record is retracted, never edited.
+
+export type ClinicRecordType = 'allergy' | 'diagnosis' | 'prescription' | 'lab' | 'visit';
+
+/** 'stopped' is for prescriptions only */
+export type RetractReason = 'entered_in_error' | 'stopped';
+
+export interface RegisterPatientInput {
+  full_name: string;
+  phone: string | null;
+  age: number | null;
+  sex: Sex | null;
+  allergies: string[];
+  no_known_allergies: boolean;
+  conditions: string[];
+  medications: string[];
+  /** Also put them in today's queue */
+  check_in: boolean;
+  /** The receptionist confirmed a possible duplicate is a different person */
+  allow_duplicate: boolean;
+}
+
+export interface PossibleDuplicate {
+  patient_id: string;
+  display_name: string;
+  age: number | null;
+  sex: Sex | null;
+  reason: 'phone' | 'name';
+}
+
+export type RegisterPatientResult =
+  | { status: 'registered'; patient_id: string; display_code: string; token: number | null }
+  | { status: 'possible_duplicate'; matches: PossibleDuplicate[] };
+
+export interface CheckInInput {
+  patient_id: string;
+  /** Short English phrases from the desk, e.g. "fever", "chest pain since morning" */
+  complaint: string[];
+  /** null: check in without vital signs (triage waits for them) */
+  vitals: Vitals | null;
+}
+
+export interface CheckInResult {
+  token: number;
+  assessment: TriageAssessment | null;
+}
+
+export interface AddClinicRecordInput {
+  patient_id: string;
+  record_type: ClinicRecordType;
+  content: string;
+  /** YYYY-MM-DD */
+  recorded_on: string;
+}
+
+export interface RetractClinicRecordInput {
+  patient_id: string;
+  record_id: string;
+  reason: RetractReason;
+  note: string | null;
+}
+
+/** Writes answer with this instead of throwing, so the form can show the reason */
+export type WriteResult<T = null> = { ok: true; data: T } | { ok: false; error: string };
 
 // ---------- Chat ----------
 

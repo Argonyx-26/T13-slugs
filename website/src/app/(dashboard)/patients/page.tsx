@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import PageContainer from '@/components/layout/page-container';
 import { patientsQueryOptions } from '@/features/patients/api/queries';
+import { ReceptionActions } from '@/features/patients/components/clinic/reception-actions';
 import { DataSourceBadge } from '@/features/patients/components/data-source-badge';
 import {
   PatientBentoGrid,
@@ -24,7 +25,12 @@ export default function Page() {
       pageTitle='Patients'
       pageDescription="Today's list, highest risk first. Open a patient to read the full record and ask the assistant."
       infoContent={patientsInfoContent}
-      pageHeaderAction={<DataSourceBadge />}
+      pageHeaderAction={
+        <div className='flex flex-col items-end gap-2'>
+          <ReceptionActions />
+          <DataSourceBadge />
+        </div>
+      }
     >
       <HydrationBoundary state={dehydrate(queryClient)}>
         <Suspense fallback={<PatientBentoGridSkeleton />}>

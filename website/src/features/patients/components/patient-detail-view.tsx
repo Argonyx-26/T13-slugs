@@ -3,7 +3,7 @@
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { MotionConfig } from 'motion/react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Icons, type Icon } from '@/components/icons';
 import {
   AccordionSpring,
@@ -30,6 +30,10 @@ import type {
 import { formatDate, initials, sourceLabel, vitalReadings } from '../utils/record';
 import { AllergyChip } from './allergy-chip';
 import { PatientTerminal } from './chat/patient-terminal';
+import { AddRecordDialog } from './clinic/add-record-dialog';
+import { CheckInDialog } from './clinic/check-in-dialog';
+import { CorrectRecordMenu } from './clinic/correct-record-menu';
+import { PatientDocuments } from './patient-documents';
 import { LikelihoodBadge, RISK_META, RiskBadge, RiskMeter, riskColorVar } from './risk-indicator';
 import {
   TRIAGE_META,
@@ -44,11 +48,13 @@ const SEX_LABEL = { M: 'Male', F: 'Female', O: 'Other' } as const;
 function SectionHeading({
   icon: IconComponent,
   title,
-  caption
+  caption,
+  action
 }: {
   icon: Icon;
   title: string;
   caption?: string;
+  action?: ReactNode;
 }) {
   return (
     <div className='mb-4 flex items-end justify-between gap-3 border-b pb-2'>
@@ -56,7 +62,12 @@ function SectionHeading({
         <IconComponent className='text-muted-foreground size-4' aria-hidden />
         {title}
       </h2>
-      {caption && <span className='text-muted-foreground text-xs'>{caption}</span>}
+      <div className='flex items-center gap-3'>
+        {caption && (
+          <span className='text-muted-foreground hidden text-xs sm:inline'>{caption}</span>
+        )}
+        {action}
+      </div>
     </div>
   );
 }
@@ -183,12 +194,16 @@ function FactList({
   title,
   icon: IconComponent,
   facts,
-  empty
+  empty,
+  patientId,
+  prescription = false
 }: {
   title: string;
   icon: Icon;
   facts: Fact[];
   empty: string;
+  patientId: string;
+  prescription?: boolean;
 }) {
   return (
     <div className='bg-card relative rounded-2xl border p-4'>
@@ -199,12 +214,21 @@ function FactList({
       {facts.length ? (
         <ul className='flex flex-col gap-2.5'>
           {facts.map((f) => (
-            <li key={`${f.value}-${f.recorded_on}`} className='text-sm'>
-              <p className='font-medium'>{f.value}</p>
-              {f.note && <p className='text-foreground/80'>{f.note}</p>}
-              <p className='text-muted-foreground text-xs'>
-                {sourceLabel(f.source)} · {formatDate(f.recorded_on)}
-              </p>
+            <li key={f.record_id ?? `${f.value}-${f.recorded_on}`} className='flex gap-2 text-sm'>
+              <div className='min-w-0 flex-1'>
+                <p className='font-medium'>{f.value}</p>
+                {f.note && <p className='text-foreground/80'>{f.note}</p>}
+                <p className='text-muted-foreground text-xs'>
+                  {sourceLabel(f.source)} · {formatDate(f.recorded_on)}
+                </p>
+              </div>
+              {f.record_id && (
+                <CorrectRecordMenu
+                  patientId={patientId}
+                  prescription={prescription}
+                  records={[{ record_id: f.record_id, label: f.value }]}
+                />
+              )}
             </li>
           ))}
         </ul>
@@ -215,7 +239,7 @@ function FactList({
   );
 }
 
-function LabList({ labs }: { labs: LabResult[] }) {
+function LabList({ labs, patientId }: { labs: LabResult[]; patientId: string }) {
   const byName = new Map<string, LabResult[]>();
   for (const l of labs.toSorted((a, b) => a.taken_on.localeCompare(b.taken_on))) {
     byName.set(l.name, [...(byName.get(l.name) ?? []), l]);
@@ -228,27 +252,40 @@ function LabList({ labs }: { labs: LabResult[] }) {
       </h3>
       {byName.size ? (
         <ul className='flex flex-col gap-2.5'>
-          {[...byName.entries()].map(([name, series]) => (
-            <li key={name} className='text-sm'>
-              <p className='font-medium'>{name}</p>
-              <p className='text-foreground/80 flex flex-wrap items-center gap-x-1.5 tabular-nums'>
-                {series.map((l, i) => (
-                  <span key={l.taken_on} className='inline-flex items-center gap-1.5'>
-                    {i > 0 && (
-                      <Icons.arrowRight
-                        className='text-muted-foreground size-3'
-                        aria-label='then'
-                      />
-                    )}
-                    {l.value}
-                    <span className='text-muted-foreground text-xs'>
-                      ({formatDate(l.taken_on)})
+          {[...byName.entries()].map(([name, series]) => {
+            const correctable = series
+              .filter((l) => l.record_id)
+              .map((l) => ({
+                record_id: l.record_id!,
+                label: `${name} ${l.value} (${formatDate(l.taken_on)})`
+              }));
+            return (
+              <li key={name} className='text-sm'>
+                <p className='flex items-center justify-between gap-2 font-medium'>
+                  {name}
+                  {correctable.length > 0 && (
+                    <CorrectRecordMenu patientId={patientId} records={correctable} />
+                  )}
+                </p>
+                <p className='text-foreground/80 flex flex-wrap items-center gap-x-1.5 tabular-nums'>
+                  {series.map((l, i) => (
+                    <span key={l.taken_on} className='inline-flex items-center gap-1.5'>
+                      {i > 0 && (
+                        <Icons.arrowRight
+                          className='text-muted-foreground size-3'
+                          aria-label='then'
+                        />
+                      )}
+                      {l.value}
+                      <span className='text-muted-foreground text-xs'>
+                        ({formatDate(l.taken_on)})
+                      </span>
                     </span>
-                  </span>
-                ))}
-              </p>
-            </li>
-          ))}
+                  ))}
+                </p>
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p className='text-muted-foreground text-sm'>No lab results on record.</p>
@@ -504,6 +541,13 @@ function PatientNarrative({ patient }: { patient: PatientRecord }) {
             icon={Icons.vitals}
             title='Triage now'
             caption='Vital signs, symptoms and record, checked by fixed rules'
+            action={
+              <CheckInDialog
+                patientId={patient.id}
+                patientName={patient.displayName}
+                trigger='small'
+              />
+            }
           />
           <TriageSection patient={patient} />
         </section>
@@ -562,27 +606,35 @@ function PatientNarrative({ patient }: { patient: PatientRecord }) {
 
       <BlurFade inView delay={0.1}>
         <section>
-          <SectionHeading icon={Icons.record} title='On record' />
+          <SectionHeading
+            icon={Icons.record}
+            title='On record'
+            action={<AddRecordDialog patientId={patient.id} />}
+          />
           <div className='grid gap-3 md:grid-cols-2'>
             <FactList
               title='Allergies'
               icon={Icons.riskHigh}
               facts={patient.profile.allergies}
               empty='Not recorded. Allergy status is unknown, not “none”.'
+              patientId={patient.id}
             />
             <FactList
               title='Current medicines'
               icon={Icons.pill}
               facts={patient.profile.active_medications}
               empty='No regular medicines on record.'
+              patientId={patient.id}
+              prescription
             />
             <FactList
               title='Long-term conditions'
               icon={Icons.activity}
               facts={patient.profile.conditions}
               empty='No long-term conditions on record.'
+              patientId={patient.id}
             />
-            <LabList labs={patient.profile.labs} />
+            <LabList labs={patient.profile.labs} patientId={patient.id} />
           </div>
         </section>
       </BlurFade>
@@ -625,6 +677,21 @@ function PatientNarrative({ patient }: { patient: PatientRecord }) {
               note.
             </p>
           )}
+        </section>
+      </BlurFade>
+
+      <BlurFade inView delay={0.1}>
+        <section>
+          <SectionHeading
+            icon={Icons.media}
+            title='Files & images'
+            caption={
+              patient.documents.length
+                ? `${patient.documents.length} ${patient.documents.length === 1 ? 'file' : 'files'}, newest first`
+                : undefined
+            }
+          />
+          <PatientDocuments patientId={patient.id} documents={patient.documents} />
         </section>
       </BlurFade>
 

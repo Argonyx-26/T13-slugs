@@ -17,6 +17,9 @@ pnpm-lock.yaml
 # production
 /build
 
+# images uploaded from the dashboard
+/.data/
+
 # misc
 .DS_Store
 *.pem

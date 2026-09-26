@@ -26,6 +26,7 @@ import {
   sortRisks,
   triageSummary
 } from '@/features/patients/utils/record';
+import { MOCK_DOCUMENTS } from './mock-documents';
 import { MOCK_TRIAGE } from './mock-triage';
 
 interface MockPatient {
@@ -940,6 +941,7 @@ function toRecord(p: MockPatient): PatientRecord {
     profile: p.profile,
     risks,
     history: p.history,
+    documents: MOCK_DOCUMENTS[p.id] ?? [],
     disclaimer: DISCLAIMER
   };
 }
@@ -951,6 +953,7 @@ function toCard(record: PatientRecord): PatientCard {
     profile: _profile,
     risks: _risks,
     history: _history,
+    documents: _documents,
     disclaimer: _disclaimer,
     ...card
   } = record;

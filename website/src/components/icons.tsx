@@ -7,6 +7,7 @@ import {
   IconArrowLeft,
   IconArrowUp,
   IconArrowsSort,
+  IconBone,
   IconCircleCheckFilled,
   IconCircleDashed,
   IconCopy,
@@ -17,7 +18,9 @@ import {
   IconNotes,
   IconPill,
   IconPlayerStopFilled,
+  IconPrescription,
   IconRefresh,
+  IconScan,
   IconReportMedical,
   IconShieldCheck,
   IconStethoscope,
@@ -258,6 +261,9 @@ export const Icons = {
   record: IconReportMedical,
   shieldCheck: IconShieldCheck,
   userPlus: IconUserPlus,
+  xray: IconBone,
+  prescription: IconPrescription,
+  scan: IconScan,
 
   // Risk levels (always shown with a text label, never alone)
   riskHigh: IconAlertTriangleFilled,
