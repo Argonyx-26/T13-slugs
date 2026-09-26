@@ -1,0 +1,154 @@
+@import 'tailwindcss';
+
+/* Nothing design language: pure black, white type, grey hairlines, one red. */
+@theme {
+  --color-ink: #000000;
+  --color-surface: #0c0c0c;
+  --color-raised: #161616;
+  --color-line: #262626;
+  --color-line-strong: #3a3a3a;
+  --color-fg: #f4f4f4;
+  --color-muted: #8e8e8e;
+  --color-faint: #4a4a4a;
+  --color-signal: #d71921;
+
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+
+  --animate-blink: blink 1.1s steps(1, end) infinite;
+
+  @keyframes blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.18;
+    }
+  }
+}
+
+/* Dot-matrix type (Doto, OFL) with round dots, like Nothing's NDot */
+@utility font-dot {
+  font-family: 'Doto Variable', 'Geist Mono Variable', monospace;
+  font-variation-settings: 'ROND' 100;
+}
+
+@utility bg-dot-grid {
+  background-image: radial-gradient(circle, rgb(255 255 255 / 0.055) 1px, transparent 1.4px);
+  background-size: 14px 14px;
+  background-position: center;
+}
+
+/* Capacitor's SystemBars plugin injects --safe-area-inset-* (older Android WebViews report
+   env() as 0); the browser falls back to env(). The desktop phone frame overrides both. */
+:root {
+  --sat: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+}
+
+@utility pt-safe {
+  padding-top: var(--sat);
+}
+
+@utility pb-safe {
+  padding-bottom: var(--sab);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-ink);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-blink,
+  .animate-ping {
+    animation: none !important;
+  }
+}
+
+/* ---------- Localhost preview: a phone on the desk, full-bleed on real phones ---------- */
+
+.device-stage,
+.device-frame,
+.device-screen {
+  position: fixed;
+  inset: 0;
+}
+
+.device-chrome,
+.device-caption {
+  display: none;
+}
+
+@media (min-width: 520px) and (min-height: 560px) {
+  .device-stage {
+    display: grid;
+    place-items: center;
+    /* safe: on a very short window the phone scrolls instead of being cut off at the top */
+    align-content: safe center;
+    gap: 14px;
+    padding-block: 20px;
+    overflow-y: auto;
+    background: radial-gradient(60% 50% at 50% 40%, #151515 0%, #050505 70%), #050505;
+  }
+
+  .device-frame {
+    position: relative;
+    inset: auto;
+    padding: 11px;
+    border-radius: 58px;
+    background: linear-gradient(160deg, #2a2a2a, #111 40%, #1b1b1b);
+    box-shadow:
+      0 0 0 1px #333,
+      0 40px 90px -20px rgb(0 0 0 / 0.9),
+      inset 0 0 0 1px rgb(255 255 255 / 0.04);
+  }
+
+  .device-screen {
+    position: relative;
+    inset: auto;
+    /* 412 x 915: the CSS viewport of Nothing Phone-class devices. Smaller windows get a
+       proportionally smaller phone, never shorter than 700px. */
+    height: clamp(700px, calc(100dvh - 90px), 915px);
+    width: calc(clamp(700px, calc(100dvh - 90px), 915px) * 412 / 915);
+    border-radius: 47px;
+    overflow: hidden;
+    background: var(--color-ink);
+    --sat: 36px;
+    --sab: 14px;
+  }
+
+  .device-chrome {
+    display: flex;
+  }
+
+  .device-caption {
+    display: block;
+  }
+}
